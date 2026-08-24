@@ -20,10 +20,12 @@ class HybridSearchEngine:
         
         self.bm25_retriever = BM25Retriever()
         self.dense_retriever = DenseRetriever()
+        self.corpus_docs: List[Dict[str, Any]] = []
         self.is_indexed = False
 
     def build_index(self, products: List[Dict[str, Any]], precomputed_embeddings: Optional[List[List[float]]] = None):
         """Build both sparse BM25 index and dense vector index."""
+        self.corpus_docs = products
         self.bm25_retriever.build_index(products)
         self.dense_retriever.build_index(products, precomputed_embeddings)
         self.is_indexed = True
@@ -95,12 +97,29 @@ class HybridSearchEngine:
         """
         Execute BM25 and Dense vector retrieval in parallel / sequence,
         then combine ranks via Reciprocal Rank Fusion (RRF).
+        Handles broad/wildcard queries by returning catalog products.
         """
         start_time = time.perf_counter()
-        
+        clean_q = query.strip()
+
+        # Handle broad catalogue/wildcard browsing
+        if clean_q in ["*", "", "all", "products", "items", "catalog", "everything"]:
+            results = []
+            for prod in self.corpus_docs:
+                if self._apply_filters(prod, category, min_price, max_price):
+                    prod_copy = dict(prod)
+                    prod_copy["_rrf_score"] = 0.01667
+                    prod_copy["_bm25_rank"] = 1
+                    prod_copy["_dense_rank"] = 1
+                    prod_copy["_retrieval_method"] = "catalog_browse"
+                    results.append(prod_copy)
+                    if len(results) >= top_k:
+                        break
+            return results
+
         # Retrieve candidates from both systems (oversample to allow rank blending)
-        bm25_candidates = self.bm25_retriever.search(query, top_k=top_k * 3)
-        dense_candidates = self.dense_retriever.search(query, top_k=top_k * 3)
+        bm25_candidates = self.bm25_retriever.search(clean_q, top_k=top_k * 3)
+        dense_candidates = self.dense_retriever.search(clean_q, top_k=top_k * 3)
 
         # SKU Map for RRF scoring
         sku_scores: Dict[str, Dict[str, Any]] = {}
@@ -146,6 +165,17 @@ class HybridSearchEngine:
 
             # Add RRF contribution from Dense
             sku_scores[sku]["rrf_score"] += self.dense_weight * (1.0 / (self.rrf_k + rank))
+
+        # If no strict matches found, fallback to dense semantic matches or catalog
+        if not sku_scores and self.corpus_docs:
+            for prod in self.corpus_docs[:top_k]:
+                if self._apply_filters(prod, category, min_price, max_price):
+                    prod_copy = dict(prod)
+                    prod_copy["_rrf_score"] = 0.005
+                    prod_copy["_bm25_rank"] = None
+                    prod_copy["_dense_rank"] = None
+                    prod_copy["_retrieval_method"] = "fallback"
+                    return [prod_copy]
 
         # Sort by total RRF score descending
         sorted_results = sorted(sku_scores.values(), key=lambda x: x["rrf_score"], reverse=True)

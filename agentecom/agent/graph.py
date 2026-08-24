@@ -40,14 +40,14 @@ from agentecom.core.cache import cache
 
 SYSTEM_PROMPT = """You are an expert Autonomous AI Shopping Agent powered by AgentEcom.
 You have access to fast, idempotent commerce tools:
-- `search_products`: Hybrid lexical + semantic search for products (handles exact SKUs, names, descriptions, and price constraints).
+- `search_products`: Hybrid lexical + semantic search for products (handles exact SKUs, names, descriptions, categories, and price constraints).
 - `get_product_details`: Get full product specs, pricing, and live inventory by SKU.
 - `check_inventory_stock`: Check availability for a list of SKUs.
 - `create_checkout_session`: Create an isolated short-lived checkout session for items.
 - `confirm_checkout_order`: Confirm and place an order idempotently.
 
 Guidelines:
-1. Always use `search_products` when the user asks for recommendations, items, or categories.
+1. Always use `search_products` when the user asks for recommendations, items, categories, or asking what is available.
 2. When the user specifies an exact SKU code (e.g. SKU-4471), check product details.
 3. Suggest adding items to cart or checking out when appropriate.
 4. Keep answers concise, clear, and highlight SKU codes and prices in bold.
@@ -96,7 +96,7 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(state["messages"])
             response = await llm_with_tools.ainvoke(messages)
             return {"messages": [response]}
-        except Exception as e:
+        except Exception:
             pass
 
     # Deterministic Local Tool Planner (Zero external API key needed, runs 100% offline)
@@ -143,20 +143,27 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             "args": {"sku": sku},
             "id": f"call_{uuid.uuid4().hex[:8]}"
         })
-    elif any(w in low for w in ["find", "search", "looking for", "show me", "sweater", "headphone", "chair", "desk", "keyboard", "monitor", "kettle", "mouse", "jacket", "shirt", "coffee", "under", "cheap"]):
+    elif any(w in low for w in [
+        "product", "products", "item", "items", "catalog", "browse", "what do you have",
+        "what are", "available", "store", "sell", "find", "search", "looking for",
+        "show me", "sweater", "headphone", "chair", "desk", "keyboard", "monitor",
+        "kettle", "mouse", "jacket", "shirt", "coffee", "under", "cheap", "all"
+    ]):
         max_p = None
         p_match = re.search(r'(?:under|less than|max|below)\s*\$?(\d+(?:\.\d+)?)', low)
         if p_match:
             max_p = float(p_match.group(1))
 
         clean_q = last_msg
-        for prefix in ["find me", "find", "search for", "search", "show me", "i am looking for", "looking for", "can you show"]:
+        for prefix in ["what are the products there", "what are the products", "what products do you have", "show all products", "show products", "list products", "browse catalog", "find me", "find", "search for", "search", "show me", "i am looking for", "looking for", "can you show"]:
             if clean_q.lower().startswith(prefix):
                 clean_q = clean_q[len(prefix):].strip()
+        if not clean_q:
+            clean_q = "products"
 
         tool_calls.append({
             "name": "search_products",
-            "args": {"query": clean_q, "max_price": max_p, "limit": 4},
+            "args": {"query": clean_q, "max_price": max_p, "limit": 6},
             "id": f"call_{uuid.uuid4().hex[:8]}"
         })
 
@@ -167,9 +174,9 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             content=(
                 "I am your Autonomous Commerce AI Agent powered by **LangGraph & AgentEcom**.\n\n"
                 "I can:\n"
-                "- 🔍 **Search catalog** (e.g. *'Find a cozy knit sweater under $60'* or *'Show me noise canceling headphones'*)\n"
-                "- 📦 **Check product specs** (e.g. *'Details for SKU-4471'*)\n"
-                "- 🛒 **Manage cart & checkout** (e.g. *'Add SKU-4471 to cart'* -> *'Checkout'* -> *'Confirm purchase'*)\n\n"
+                "- Search catalog (e.g. *'Show all products'*, *'Find a cozy knit sweater under $60'*, or *'Show me noise canceling headphones'*)\n"
+                "- Check product specs (e.g. *'Details for SKU-4471'*)\n"
+                "- Manage cart & checkout (e.g. *'Add SKU-4471 to cart'* -> *'Checkout'* -> *'Confirm purchase'*)\n\n"
                 "What product can I find for you?"
             )
         )
@@ -200,18 +207,18 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
 
         if tool_name == "search_products":
             res = await tool_search_products(
-                query=args.get("query", ""),
+                query=args.get("query", "products"),
                 max_price=args.get("max_price"),
                 category=args.get("category"),
-                limit=args.get("limit", 4)
+                limit=args.get("limit", 6)
             )
             prods = res.get("products", [])
             retrieved_prods = prods
 
-            lines = [f"Found {len(prods)} product match(es):"]
+            lines = [f"I found **{len(prods)} product(s)** in the catalog:\n"]
             for p in prods:
-                lines.append(f"- **{p['name']}** (`{p['sku']}`) — **${p['price']:.2f}** | RRF Score: {p.get('_rrf_score', 0):.4f}\n  {p.get('description', '')[:100]}...")
-            lines.append("\nTo add to cart, reply: `Add [SKU] to cart`.")
+                lines.append(f"- **{p['name']}** (`{p['sku']}`) — **${p['price']:.2f}** *(RRF Score: {p.get('_rrf_score', 0):.4f})*\n  {p.get('description', '')[:100]}...")
+            lines.append("\n💡 *To add an item to your cart, click '+ Add to Cart' or reply `Add [SKU] to cart`.*")
             result_str = "\n".join(lines)
 
         elif tool_name == "get_product_details":
@@ -221,7 +228,6 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
                 p = res["product"]
                 retrieved_prods = [p]
                 
-                # Check action or intent
                 action = args.get("action", "")
                 if action == "add_to_cart":
                     existing = next((i for i in cart if i["sku"] == sku), None)
@@ -229,7 +235,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
                         existing["quantity"] += 1
                     else:
                         cart.append({"sku": sku, "name": p["name"], "price": p["price"], "quantity": 1})
-                    result_str = f"Added **{p['name']}** (`{sku}`) to your cart ($**{p['price']:.2f}**). Cart now has {len(cart)} item(s)."
+                    result_str = f"Added **{p['name']}** (`{sku}`) to your cart for **${p['price']:.2f}**. Cart now has {len(cart)} item(s)."
                 else:
                     attrs = ", ".join([f"{k}: {v}" for k, v in p.get("attributes", {}).items()])
                     result_str = (
@@ -250,7 +256,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
             idem_key = f"idem_sess_{uuid.uuid4().hex[:8]}"
             res = await tool_create_checkout_session(items=items, idempotency_key=idem_key, ttl_minutes=15)
             if "error" in res:
-                result_str = f"Checkout failed: {res['error']}"
+                result_str = f"Checkout session creation failed: {res['error']}"
             else:
                 checkout_session = res
                 result_str = (
@@ -259,7 +265,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
                     f"- **Total Amount**: **${res['total_amount']:.2f}**\n"
                     f"- **Status**: `{res['status']}` (Expires in 15 mins)\n"
                     f"- **Idempotency Key**: `{res['idempotency_key']}`\n\n"
-                    f"Reply **'confirm purchase'** to finalize order."
+                    f"Reply **'confirm purchase'** or click confirm to place the order."
                 )
 
         elif tool_name == "confirm_checkout_order":
@@ -280,14 +286,13 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
                         f"- **Order Number**: `{res['order_number']}`\n"
                         f"- **Total Paid**: **${res['total_amount']:.2f}**\n"
                         f"- **Confirmation Key**: `{res['idempotency_key']}`\n\n"
-                        f"Inventory reserved and deducted atomically without ghost orders."
+                        f"Inventory reserved and deducted atomically without duplicate orders."
                     )
         else:
             result_str = f"Executed {tool_name}."
 
         tool_messages.append(ToolMessage(content=result_str, tool_call_id=call_id))
 
-    # Follow-up assistant message with formatted result
     final_reply = "\n\n".join([tm.content for tm in tool_messages])
     assistant_final = AIMessage(content=final_reply)
 

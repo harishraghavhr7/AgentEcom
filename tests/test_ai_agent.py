@@ -7,6 +7,12 @@ from agentecom.agent.engine import agent_engine
 async def test_langgraph_agent_multi_turn_shopping_flow(test_db_session):
     session_id = f"test_lg_sess_{uuid.uuid4().hex[:8]}"
 
+    # Turn 0: General catalog browse / "what are the products there"
+    res0 = await agent_engine.process_user_turn("what are the products there", session_id=session_id)
+    assert len(res0["tool_calls_made"]) >= 1
+    assert res0["tool_calls_made"][0]["tool"] == "search_products"
+    assert len(res0["products"]) > 0
+
     # Turn 1: Search for products via LangGraph
     res1 = await agent_engine.process_user_turn("Find a cozy knit sweater under $60", session_id=session_id)
     assert len(res1["tool_calls_made"]) >= 1
@@ -46,7 +52,7 @@ async def test_agent_api_endpoints(async_client: AsyncClient, test_db_session):
     # Test POST /api/v1/agent/chat
     session_id = f"api_lg_sess_{uuid.uuid4().hex[:8]}"
     chat_payload = {
-        "message": "Show me noise canceling headphones",
+        "message": "what are the products there",
         "session_id": session_id,
         "llm_provider": "local"
     }

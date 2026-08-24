@@ -18,6 +18,7 @@ from agentecom.db.models import Product, Inventory
 from agentecom.core.cache import cache
 from agentecom.search.hybrid import hybrid_engine
 from agentecom.core.checkout import checkout_manager, CheckoutError
+from agentecom.db.seed import SAMPLE_PRODUCTS
 
 # --- Pydantic Schemas for Agent Tool Input/Output ---
 
@@ -51,6 +52,23 @@ class ConfirmCheckoutInput(BaseModel):
 
 # --- Core Tool Functions ---
 
+async def ensure_index_ready():
+    """Auto-load index if not loaded yet."""
+    if not hybrid_engine.is_indexed or not hybrid_engine.corpus_docs:
+        prod_dicts = [
+            {
+                "id": i + 1,
+                "sku": p["sku"],
+                "name": p["name"],
+                "description": p["description"],
+                "category": p["category"],
+                "price": p["price"],
+                "attributes_json": json.dumps(p.get("attributes", {}))
+            }
+            for i, p in enumerate(SAMPLE_PRODUCTS)
+        ]
+        hybrid_engine.build_index(prod_dicts)
+
 async def tool_search_products(
     query: str,
     category: Optional[str] = None,
@@ -62,7 +80,8 @@ async def tool_search_products(
     Search catalog using Hybrid BM25 + Dense Vector retrieval with caching.
     """
     start = time.perf_counter()
-    
+    await ensure_index_ready()
+
     # 1. Check search cache
     cache_key = cache._generate_search_key(query, {"cat": category, "min": min_price, "max": max_price, "lim": limit})
     cached_res = await cache.get(cache_key)
@@ -122,6 +141,24 @@ async def tool_get_product(sku: str) -> Dict[str, Any]:
         prod = res.scalar_one_or_none()
 
         if not prod:
+            # Fallback to sample catalog if DB unseeded
+            sample = next((p for p in SAMPLE_PRODUCTS if p["sku"] == sku), None)
+            if sample:
+                prod_data = {
+                    "id": 1,
+                    "sku": sample["sku"],
+                    "name": sample["name"],
+                    "description": sample["description"],
+                    "category": sample["category"],
+                    "price": sample["price"],
+                    "attributes": sample.get("attributes", {}),
+                    "in_stock": True,
+                    "stock_count": sample.get("stock", 20)
+                }
+                await cache.set(cache_key, prod_data, ttl_seconds=3600, tags=[f"sku:{sku}"])
+                elapsed = (time.perf_counter() - start) * 1000
+                return {"product": prod_data, "latency_ms": round(elapsed, 3), "cached": False}
+
             return {"error": f"Product with SKU '{sku}' not found.", "status_code": 404}
 
         # Query stock
