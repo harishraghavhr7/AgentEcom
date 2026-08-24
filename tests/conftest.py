@@ -2,7 +2,6 @@ import pytest
 import pytest_asyncio
 import asyncio
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy import select
 
 from agentecom.db.database import init_db, AsyncSessionLocal
 from agentecom.db.models import Product, Inventory
@@ -14,10 +13,8 @@ from agentecom.api.main import app
 @pytest_asyncio.fixture(scope="function")
 async def test_db_session():
     await init_db()
-    await seed_database()
-
-    async with AsyncSessionLocal() as session:
-        yield session
+    await seed_database(force_reset=True)
+    yield
 
 @pytest_asyncio.fixture(autouse=True)
 async def reset_cache_and_search():

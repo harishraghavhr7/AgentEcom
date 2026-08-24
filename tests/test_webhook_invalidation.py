@@ -2,6 +2,7 @@ import pytest
 from agentecom.core.cache import cache
 from agentecom.tools.commerce import tool_get_product
 from agentecom.db.models import Product
+from agentecom.db.database import AsyncSessionLocal
 from sqlalchemy import select
 
 @pytest.mark.asyncio
@@ -17,10 +18,11 @@ async def test_webhook_invalidation_by_sku(test_db_session):
     assert res2["product"]["price"] == 58.50
 
     # 2. Simulate Merchant updating price in DB
-    stmt = select(Product).where(Product.sku == sku)
-    p_obj = (await test_db_session.execute(stmt)).scalar_one()
-    p_obj.price = 65.00
-    await test_db_session.commit()
+    async with AsyncSessionLocal() as session:
+        stmt = select(Product).where(Product.sku == sku)
+        p_obj = (await session.execute(stmt)).scalar_one()
+        p_obj.price = 65.00
+        await session.commit()
 
     # 3. Trigger webhook invalidation for that SKU
     invalidated_count = await cache.invalidate_sku(sku)

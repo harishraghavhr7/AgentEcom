@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentEcom — LangGraph Autonomous AI Commerce Agent</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        pre, code { font-family: 'JetBrains Mono', monospace; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased">
+
+    <!-- Header Navigation -->
+    <header class="border-b border-slate-800 bg-slate-900/90 sticky top-0 z-50 backdrop-blur-md px-6 py-3 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+            <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 font-bold text-white text-lg">
+                🦜
+            </div>
+            <div>
+                <h1 class="font-bold text-base text-white tracking-tight flex items-center gap-2">
+                    AgentEcom <span class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-medium border border-indigo-500/30">LangGraph Agent</span>
+                </h1>
+                <p class="text-[11px] text-slate-400">LangChain & LangGraph with Ollama / Groq Switching</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-3">
+            <!-- LLM Provider Switcher -->
+            <div class="flex items-center gap-1.5 bg-slate-800/90 px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
+                <span class="text-slate-400">Provider:</span>
+                <select id="providerSelect" onchange="handleProviderChange()" class="bg-slate-900 text-cyan-300 font-medium border-0 focus:outline-none cursor-pointer rounded px-1.5 py-0.5">
+                    <option value="local">⚡ Local Zero-Key</option>
+                    <option value="ollama">🦙 Ollama (Local)</option>
+                    <option value="groq">⚡ Groq API (Llama 3.3)</option>
+                </select>
+            </div>
+
+            <button onclick="toggleSettingsModal()" class="text-xs text-slate-300 hover:text-white px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 transition">
+                ⚙️ Config
+            </button>
+            <button onclick="resetConversation()" class="text-xs text-slate-400 hover:text-white px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 transition">
+                Reset
+            </button>
+            <a href="/docs" target="_blank" class="text-xs text-cyan-400 hover:underline">
+                Docs →
+            </a>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="flex-1 flex overflow-hidden">
+        
+        <!-- Left: Conversational Shopping Interface -->
+        <div class="flex-1 flex flex-col h-[calc(100vh-60px)] bg-slate-900 border-r border-slate-800">
+            
+            <!-- Chat Messages Thread -->
+            <div id="chatThread" class="flex-1 overflow-y-auto p-6 space-y-6">
+                <!-- Welcome Assistant Message -->
+                <div class="flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow">
+                        🦜
+                    </div>
+                    <div class="max-w-[85%] bg-slate-800/90 border border-slate-700 rounded-2xl rounded-tl-none p-4 text-slate-200 text-sm shadow-md space-y-2">
+                        <p class="font-semibold text-white">Hello! I am your Autonomous Commerce AI Agent built with <strong>LangGraph</strong>.</p>
+                        <p class="text-slate-300">I execute multi-step shopping workflows using <strong>Hybrid Search (BM25 + Dense RRF)</strong>, <strong>Aggressive In-Memory Caching (<0.1ms)</strong>, and <strong>Idempotent Isolated Checkout Sessions</strong>.</p>
+                        <div class="pt-2 flex flex-wrap gap-2 text-xs">
+                            <span class="text-slate-400 self-center">Try asking:</span>
+                            <button onclick="sendQuickPrompt('Find a cozy knit sweater under $60')" class="bg-slate-700/80 hover:bg-cyan-600/30 hover:text-cyan-300 text-slate-300 px-2.5 py-1 rounded-md border border-slate-600 transition">
+                                🧥 Cozy sweater under $60
+                            </button>
+                            <button onclick="sendQuickPrompt('Show me Sony noise canceling headphones')" class="bg-slate-700/80 hover:bg-cyan-600/30 hover:text-cyan-300 text-slate-300 px-2.5 py-1 rounded-md border border-slate-600 transition">
+                                🎧 Noise canceling headphones
+                            </button>
+                            <button onclick="sendQuickPrompt('Details for SKU-4471')" class="bg-slate-700/80 hover:bg-cyan-600/30 hover:text-cyan-300 text-slate-300 px-2.5 py-1 rounded-md border border-slate-600 transition">
+                                🏷️ Lookup SKU-4471
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Suggestion Badges -->
+            <div class="px-6 py-2 bg-slate-900/60 border-t border-slate-800 flex items-center gap-2 overflow-x-auto text-xs">
+                <span class="text-slate-500 whitespace-nowrap">Agent Actions:</span>
+                <button onclick="sendQuickPrompt('Find high-end ergonomic desk chair')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
+                    🪑 Ergonomic Chair
+                </button>
+                <button onclick="sendQuickPrompt('electric gooseneck kettle')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
+                    ☕ Gooseneck Kettle
+                </button>
+                <button onclick="sendQuickPrompt('view cart')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
+                    🛒 View Cart
+                </button>
+                <button onclick="sendQuickPrompt('checkout')" class="whitespace-nowrap bg-slate-800 hover:bg-cyan-900/40 text-cyan-300 px-2.5 py-1 rounded-full border border-cyan-700/50 transition">
+                    💳 Checkout
+                </button>
+            </div>
+
+            <!-- Input Area -->
+            <div class="p-4 bg-slate-900 border-t border-slate-800">
+                <form id="chatForm" onsubmit="handleChatSubmit(event)" class="flex gap-2">
+                    <input 
+                        type="text" 
+                        id="chatInput" 
+                        placeholder="Search products, check SKU, ask questions, or checkout..."
+                        class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition shadow-inner"
+                        autocomplete="off"
+                    />
+                    <button 
+                        type="submit" 
+                        id="sendBtn"
+                        class="bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-medium px-5 py-3 rounded-xl text-sm transition shadow-lg shadow-cyan-500/20 flex items-center gap-2"
+                    >
+                        <span>Send</span>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Right: AI Readability & LangGraph Telemetry Inspector -->
+        <div class="w-96 flex flex-col h-[calc(100vh-60px)] bg-slate-950 border-slate-800 overflow-y-auto p-5 space-y-6">
+            
+            <!-- Readability & Token Economy Header -->
+            <div>
+                <h2 class="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                    LangGraph AI Readability & Telemetry
+                </h2>
+                <p class="text-[11px] text-slate-400 mt-1">Live token economy & graph execution audit</p>
+            </div>
+
+            <!-- Telemetry Metrics Cards -->
+            <div class="grid grid-cols-2 gap-3">
+                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
+                    <p class="text-[10px] font-medium text-slate-400">Execution Latency</p>
+                    <p id="metricLatency" class="text-lg font-bold text-emerald-400 mt-0.5">0.0 ms</p>
+                    <span class="text-[9px] text-slate-500">Sub-millisecond ready</span>
+                </div>
+                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
+                    <p class="text-[10px] font-medium text-slate-400">Token Reduction</p>
+                    <p id="metricTokenReduction" class="text-lg font-bold text-cyan-400 mt-0.5">0.0%</p>
+                    <span class="text-[9px] text-slate-500">Tool token compression</span>
+                </div>
+                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
+                    <p class="text-[10px] font-medium text-slate-400">Est. Raw Tokens</p>
+                    <p id="metricRawTokens" class="text-base font-semibold text-slate-300 mt-0.5">0</p>
+                    <span class="text-[9px] text-slate-500">Uncompressed dump</span>
+                </div>
+                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
+                    <p class="text-[10px] font-medium text-slate-400">Tool Tokens</p>
+                    <p id="metricToolTokens" class="text-base font-semibold text-indigo-300 mt-0.5">0</p>
+                    <span class="text-[9px] text-slate-500">Structured agent tokens</span>
+                </div>
+            </div>
+
+            <!-- Active Shopping Cart Drawer -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
+                        <span>🛒</span> Live Cart
+                    </h3>
+                    <span id="cartCountBadge" class="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full font-medium border border-cyan-500/30">0 items</span>
+                </div>
+
+                <div id="cartItemsList" class="space-y-2 text-xs max-h-36 overflow-y-auto">
+                    <p class="text-slate-500 italic">Your cart is currently empty.</p>
+                </div>
+
+                <div id="cartTotalSection" class="pt-2 border-t border-slate-800 flex justify-between items-center hidden">
+                    <span class="text-xs text-slate-400">Total:</span>
+                    <span id="cartTotalPrice" class="text-sm font-bold text-white">$0.00</span>
+                </div>
+
+                <button id="cartCheckoutBtn" onclick="sendQuickPrompt('checkout')" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 rounded-lg text-xs transition shadow hidden">
+                    Proceed to Isolated Checkout
+                </button>
+            </div>
+
+            <!-- LangGraph Tool Call Execution Traces -->
+            <div class="space-y-2">
+                <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    LangGraph Node & Tool Traces
+                </h3>
+                <div id="toolCallTrace" class="space-y-2 text-xs">
+                    <div class="p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-slate-400">
+                        No graph nodes executed yet. Submit a prompt to trace.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Idempotency & Isolation Tracker -->
+            <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
+                <h4 class="font-semibold text-slate-300 flex items-center gap-1.5">
+                    <span>🛡️</span> Idempotency & Session State
+                </h4>
+                <div class="space-y-1 text-slate-400">
+                    <p>Session: <code id="activeSessionId" class="text-cyan-400 text-[11px]">-</code></p>
+                    <p>Active LLM: <code id="activeModelLabel" class="text-slate-300 text-[11px]">Local Zero-Key</code></p>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- Provider Configuration Modal -->
+    <div id="configModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+            <div class="flex justify-between items-center border-b border-slate-800 pb-3">
+                <h3 class="font-bold text-white text-base">LLM Provider Configuration</h3>
+                <button onclick="toggleSettingsModal()" class="text-slate-400 hover:text-white">&times;</button>
+            </div>
+            
+            <div class="space-y-3 text-xs">
+                <div>
+                    <label class="block font-medium text-slate-300 mb-1">Groq API Key (Optional)</label>
+                    <input type="password" id="groqApiKeyInput" placeholder="gsk_..." class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                    <p class="text-[10px] text-slate-500 mt-1">Used when Provider is set to 'Groq API'.</p>
+                </div>
+                <div>
+                    <label class="block font-medium text-slate-300 mb-1">Ollama Base URL</label>
+                    <input type="text" id="ollamaUrlInput" value="http://localhost:11434" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                </div>
+                <div>
+                    <label class="block font-medium text-slate-300 mb-1">Model Name</label>
+                    <input type="text" id="modelNameInput" placeholder="llama-3.3-70b-versatile or llama3.2" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                </div>
+            </div>
+
+            <div class="pt-2 flex justify-end gap-2">
+                <button onclick="toggleSettingsModal()" class="bg-cyan-600 hover:bg-cyan-500 text-white font-medium px-4 py-2 rounded-lg text-xs transition">
+                    Save & Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script>
+        let currentSessionId = "sess_" + Math.random().toString(36).substring(2, 10);
+        document.getElementById('activeSessionId').textContent = currentSessionId;
+
+        function toggleSettingsModal() {
+            document.getElementById('configModal').classList.toggle('hidden');
+        }
+
+        function handleProviderChange() {
+            const val = document.getElementById('providerSelect').value;
+            const labelMap = {
+                'local': 'Local Zero-Key',
+                'ollama': '🦙 Ollama (Local)',
+                'groq': '⚡ Groq API'
+            };
+            document.getElementById('activeModelLabel').textContent = labelMap[val] || val;
+        }
+
+        function sendQuickPrompt(promptText) {
+            document.getElementById('chatInput').value = promptText;
+            handleChatSubmit(new Event('submit'));
+        }
+
+        async function handleChatSubmit(e) {
+            if (e) e.preventDefault();
+            const input = document.getElementById('chatInput');
+            const userMsg = input.value.trim();
+            if (!userMsg) return;
+
+            input.value = '';
+            appendUserMessage(userMsg);
+
+            const sendBtn = document.getElementById('sendBtn');
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = 'Thinking...';
+
+            const provider = document.getElementById('providerSelect').value;
+            const groqKey = document.getElementById('groqApiKeyInput').value.trim();
+            const ollamaUrl = document.getElementById('ollamaUrlInput').value.trim();
+            const modelName = document.getElementById('modelNameInput').value.trim();
+
+            try {
+                const response = await fetch('/api/v1/agent/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: userMsg,
+                        session_id: currentSessionId,
+                        llm_provider: provider,
+                        llm_api_key: groqKey || undefined,
+                        model_name: modelName || undefined
+                    })
+                });
+
+                const data = await response.json();
+                appendAssistantMessage(data.reply, data.products);
+                updateTelemetry(data);
+            } catch (err) {
+                appendAssistantMessage("⚠️ Error contacting AgentEcom server: " + err.message);
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = `<span>Send</span><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>`;
+            }
+        }
+
+        function appendUserMessage(text) {
+            const thread = document.getElementById('chatThread');
+            const msgHtml = `
+                <div class="flex items-start gap-3 justify-end">
+                    <div class="max-w-[80%] bg-gradient-to-r from-cyan-600 to-indigo-600 text-white rounded-2xl rounded-tr-none p-3.5 text-sm shadow-md">
+                        ${escapeHtml(text)}
+                    </div>
+                    <div class="w-8 h-8 rounded-lg bg-slate-700 text-white flex items-center justify-center font-bold text-xs shadow">
+                        YOU
+                    </div>
+                </div>
+            `;
+            thread.insertAdjacentHTML('beforeend', msgHtml);
+            thread.scrollTop = thread.scrollHeight;
+        }
+
+        function appendAssistantMessage(markdownText, products = []) {
+            const thread = document.getElementById('chatThread');
+            
+            let productCardsHtml = '';
+            if (products && products.length > 0) {
+                productCardsHtml = `
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
+                        ${products.map(p => `
+                            <div class="bg-slate-900 border border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-cyan-500/50 transition shadow">
+                                <div>
+                                    <div class="flex justify-between items-start">
+                                        <span class="text-[10px] font-mono bg-slate-800 text-cyan-300 px-2 py-0.5 rounded border border-slate-700">${p.sku}</span>
+                                        <span class="text-xs font-bold text-emerald-400">$${(p.price || 0).toFixed(2)}</span>
+                                    </div>
+                                    <h4 class="font-semibold text-white text-xs mt-2 line-clamp-1">${p.name || 'Product'}</h4>
+                                    <p class="text-[11px] text-slate-400 mt-1 line-clamp-2">${p.description || ''}</p>
+                                </div>
+                                <div class="mt-3 flex gap-2">
+                                    <button onclick="sendQuickPrompt('Add ${p.sku} to cart')" class="flex-1 bg-cyan-600/90 hover:bg-cyan-500 text-white text-[11px] font-medium py-1.5 rounded-lg transition text-center">
+                                        + Add to Cart
+                                    </button>
+                                    <button onclick="sendQuickPrompt('Details for ${p.sku}')" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] px-2.5 py-1.5 rounded-lg transition">
+                                        Info
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            const parsedMarkdown = marked.parse(markdownText);
+            const msgHtml = `
+                <div class="flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow flex-shrink-0">
+                        🦜
+                    </div>
+                    <div class="max-w-[85%] bg-slate-800/90 border border-slate-700 rounded-2xl rounded-tl-none p-4 text-slate-200 text-sm shadow-md space-y-2">
+                        <div class="prose prose-invert prose-sm max-w-none text-slate-200">
+                            ${parsedMarkdown}
+                        </div>
+                        ${productCardsHtml}
+                    </div>
+                </div>
+            `;
+            thread.insertAdjacentHTML('beforeend', msgHtml);
+            thread.scrollTop = thread.scrollHeight;
+        }
+
+        function updateTelemetry(data) {
+            const r = data.readability;
+            if (r) {
+                document.getElementById('metricLatency').textContent = `${r.execution_latency_ms} ms`;
+                document.getElementById('metricTokenReduction').textContent = `${r.token_reduction_pct}%`;
+                document.getElementById('metricRawTokens').textContent = r.estimated_raw_tokens;
+                document.getElementById('metricToolTokens').textContent = r.compressed_tool_tokens;
+            }
+
+            // Update Tool Call Traces
+            const traceContainer = document.getElementById('toolCallTrace');
+            if (data.tool_calls_made && data.tool_calls_made.length > 0) {
+                traceContainer.innerHTML = data.tool_calls_made.map(tc => `
+                    <div class="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-1.5">
+                        <div class="flex items-center justify-between">
+                            <span class="font-mono text-cyan-400 text-xs font-semibold">${tc.tool}</span>
+                            <span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">Node Executed</span>
+                        </div>
+                        <pre class="text-[10px] text-slate-400 bg-slate-950 p-2 rounded overflow-x-auto">${JSON.stringify(tc.args, null, 2)}</pre>
+                    </div>
+                `).join('');
+            }
+
+            // Update Cart Section
+            const cartItemsList = document.getElementById('cartItemsList');
+            const cartCountBadge = document.getElementById('cartCountBadge');
+            const cartTotalSection = document.getElementById('cartTotalSection');
+            const cartTotalPrice = document.getElementById('cartTotalPrice');
+            const cartCheckoutBtn = document.getElementById('cartCheckoutBtn');
+
+            if (data.cart && data.cart.length > 0) {
+                const totalItems = data.cart.reduce((sum, i) => sum + i.quantity, 0);
+                const totalPrice = data.cart.reduce((sum, i) => sum + (i.price * i.quantity), 0);
+
+                cartCountBadge.textContent = `${totalItems} item(s)`;
+                cartItemsList.innerHTML = data.cart.map(i => `
+                    <div class="flex justify-between items-center bg-slate-950/60 p-2 rounded-lg border border-slate-800">
+                        <div>
+                            <span class="font-medium text-white">${i.quantity}x ${i.name}</span>
+                            <div class="text-[10px] text-slate-400 font-mono">${i.sku}</div>
+                        </div>
+                        <span class="font-bold text-emerald-400">$${(i.price * i.quantity).toFixed(2)}</span>
+                    </div>
+                `).join('');
+
+                cartTotalSection.classList.remove('hidden');
+                cartTotalPrice.textContent = `$${totalPrice.toFixed(2)}`;
+                cartCheckoutBtn.classList.remove('hidden');
+            } else {
+                cartCountBadge.textContent = `0 items`;
+                cartItemsList.innerHTML = `<p class="text-slate-500 italic">Your cart is currently empty.</p>`;
+                cartTotalSection.classList.add('hidden');
+                cartCheckoutBtn.classList.add('hidden');
+            }
+        }
+
+        async function resetConversation() {
+            await fetch(`/api/v1/agent/sessions/${currentSessionId}`, { method: 'DELETE' });
+            currentSessionId = "sess_" + Math.random().toString(36).substring(2, 10);
+            document.getElementById('activeSessionId').textContent = currentSessionId;
+            document.getElementById('chatThread').innerHTML = '';
+            document.getElementById('cartItemsList').innerHTML = `<p class="text-slate-500 italic">Your cart is currently empty.</p>`;
+            document.getElementById('cartCountBadge').textContent = '0 items';
+            document.getElementById('cartTotalSection').classList.add('hidden');
+            document.getElementById('cartCheckoutBtn').classList.add('hidden');
+            document.getElementById('toolCallTrace').innerHTML = `<div class="p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-slate-400">Session cleared.</div>`;
+            
+            appendAssistantMessage("Session reset. How can I help you with shopping today?");
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+</html>

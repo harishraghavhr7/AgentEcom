@@ -1,7 +1,8 @@
 import json
 import asyncio
+from sqlalchemy import select, delete
 from agentecom.db.database import AsyncSessionLocal, init_db
-from agentecom.db.models import Product, Inventory
+from agentecom.db.models import Product, Inventory, CheckoutSession, Order, ProductEmbedding
 from agentecom.core.cache import cache
 
 SAMPLE_PRODUCTS = [
@@ -115,15 +116,21 @@ SAMPLE_PRODUCTS = [
     }
 ]
 
-async def seed_database():
+async def seed_database(force_reset: bool = False):
     await init_db()
     async with AsyncSessionLocal() as session:
-        from sqlalchemy import select
-        result = await session.execute(select(Product))
-        existing = result.scalars().all()
-        if existing:
-            print(f"[Seed] Database already contains {len(existing)} products.")
-            return
+        if force_reset:
+            await session.execute(delete(Inventory))
+            await session.execute(delete(ProductEmbedding))
+            await session.execute(delete(CheckoutSession))
+            await session.execute(delete(Order))
+            await session.execute(delete(Product))
+            await session.commit()
+        else:
+            result = await session.execute(select(Product))
+            existing = result.scalars().all()
+            if existing:
+                return
 
         for p_data in SAMPLE_PRODUCTS:
             prod = Product(
@@ -146,7 +153,6 @@ async def seed_database():
 
         await session.commit()
         await cache.clear()
-        print(f"[Seed] Successfully seeded {len(SAMPLE_PRODUCTS)} products.")
 
 if __name__ == "__main__":
-    asyncio.run(seed_database())
+    asyncio.run(seed_database(force_reset=True))
