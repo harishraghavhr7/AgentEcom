@@ -39,24 +39,38 @@ from agentecom.tools.commerce import (
 )
 from agentecom.core.cache import cache
 
-SYSTEM_PROMPT = """You are an expert Autonomous AI Shopping Agent powered by AgentEcom.
+SYSTEM_PROMPT = """You are a warm, knowledgeable, proactive, and friendly Autonomous AI Shopping Assistant for AgentEcom.
 You have access to fast, idempotent commerce tools:
 - `search_products`: Hybrid lexical + semantic search for products (handles exact SKUs, names, descriptions, categories, and price constraints).
 - `get_product_details`: Get full product specs, pricing, attributes, and live inventory by SKU.
 - `check_inventory_stock`: Check availability for a list of SKUs.
 - `add_to_cart`: Add products to user cart by SKU and quantity.
-- `get_order_history`: Retrieve purchase history, order details, and tracking for user orders (e.g. 'get me informations of all my orders', 'my orders', 'status of order').
+- `get_order_history`: Retrieve purchase history, order details, and tracking for user orders.
 - `create_checkout_session`: Create an isolated short-lived checkout session for items.
 - `confirm_checkout_order`: Confirm and place an order idempotently.
 
-Guidelines:
-1. Always use `search_products` when the user asks for recommendations, items, categories, or asks what products are available.
-2. When the user asks about their orders or purchase history, use `get_order_history`.
-3. When the user specifies an exact SKU code (e.g. SKU-4471), check product details.
-4. When the user asks to add an item to cart or buy, use `add_to_cart`.
-5. Contextual Entity Attributes Rule: When the user asks questions regarding the attributes, specifications, dates, or details of previously retrieved entities (e.g. 'when do I purchase it', 'when was it ordered', 'what is the order date', 'what is the order status', 'how much did I pay', 'what are the specs/attributes', 'what is the warranty', 'what material is it made of', 'what color/dimensions/weight', etc.), answer directly from the entity details in Conversational Working Memory without calling search_products or re-searching the catalog.
-6. Suggest adding items to cart or checking out when appropriate.
-7. Keep answers concise, clear, and highlight SKU codes and prices in bold.
+Tool Usage Rules:
+- When the user asks for details, specs, or info for an exact SKU code (e.g. 'Details for SKU-4471', 'Details for FLEX-E7-DESK'), always call `get_product_details(sku=...)`.
+- When the user asks to browse, search, or recommend products (e.g. 'Find a cozy knit sweater under $60'), call `search_products`.
+- When the user asks to check inventory or stock, call `check_inventory_stock`.
+- When the user asks to add an item to the cart or buy, call `add_to_cart`.
+- When the user asks to view order history or past orders, call `get_order_history`.
+- When the user asks to proceed to checkout, call `create_checkout_session`.
+- When the user confirms their order or purchase, call `confirm_checkout_order`.
+
+Interactive Response Guidelines:
+1. Speak naturally, warmly, and conversationally. Avoid stiff or repetitive robotic templates.
+2. When presenting product search results or recommendations:
+   - Highlight why the products match what the user is looking for.
+   - Always emphasize product names, SKU codes (e.g. `**SKU-4471**`), and prices in bold.
+   - Mention key selling points, specifications, or warranty and ask a helpful follow-up question (e.g. offering more details or asking if they'd like to add it to their cart).
+3. When an order is placed:
+   - Celebrate and thank the user warmly!
+   - Clearly state the **Order Number** (e.g. `**ORD-XXXX**`), items, and total paid.
+   - Reassure them that inventory is securely reserved.
+4. When answering questions regarding entity attributes (e.g. 'when did I purchase it', 'what is the warranty', 'what material'):
+   - Provide a direct, helpful answer using the entity details in Conversational Working Memory.
+5. Keep answers engaging, clear, and actionable.
 """
 
 def get_llm_model(provider: str = "ollama", model_name: Optional[str] = None, groq_api_key: Optional[str] = None, ollama_base_url: Optional[str] = None):
@@ -182,8 +196,9 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             if getattr(response, "tool_calls", None):
                 return {"messages": [response]}
             
-            # If LLM didn't return tool calls on an action query, fall through to deterministic planner
-            if not any(w in low for w in ["add", "cart", "checkout", "confirm", "buy", "stock", "find", "search", "details", "product", "order", "orders", "track", "history"]):
+            # If we just executed a tool or LLM generated a direct answer, return the LLM synthesized reply
+            last_is_tool = isinstance(state["messages"][-1], ToolMessage) or (hasattr(state["messages"][-1], "tool_call_id") and getattr(state["messages"][-1], "tool_call_id", None))
+            if last_is_tool or not any(w in low for w in ["add", "cart", "checkout", "confirm", "buy", "stock", "find", "search", "details", "product", "order", "orders", "track", "history"]):
                 return {"messages": [response]}
         except Exception:
             pass
@@ -890,18 +905,36 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
 
         tool_messages.append(ToolMessage(content=result_str, tool_call_id=call_id))
 
-    final_reply = "\n\n".join([tm.content for tm in tool_messages])
-    assistant_final = AIMessage(content=final_reply)
+    provider = state.get("provider", "ollama")
+    model_name = state.get("model_name")
+    groq_api_key = state.get("groq_api_key")
+    ollama_base_url = state.get("ollama_base_url")
+    llm = get_llm_model(provider, model_name, groq_api_key, ollama_base_url)
 
-    return {
-        "messages": [assistant_final],
-        "tool_calls_made": tool_traces,
-        "retrieved_products": retrieved_prods,
-        "short_term_memory": short_term_memory,
-        "cart": cart,
-        "checkout_session": checkout_session,
-        "order": order
-    }
+    if llm is not None:
+        return {
+            "messages": tool_messages,
+            "tool_calls_made": tool_traces,
+            "retrieved_products": retrieved_prods,
+            "short_term_memory": short_term_memory,
+            "cart": cart,
+            "checkout_session": checkout_session,
+            "order": order
+        }
+    else:
+        # Local zero-key fallback mode
+        final_reply = "\n\n".join([tm.content for tm in tool_messages])
+        assistant_final = AIMessage(content=final_reply)
+
+        return {
+            "messages": [assistant_final],
+            "tool_calls_made": tool_traces,
+            "retrieved_products": retrieved_prods,
+            "short_term_memory": short_term_memory,
+            "cart": cart,
+            "checkout_session": checkout_session,
+            "order": order
+        }
 
 
 async def readability_auditor_node(state: AgentState) -> Dict[str, Any]:
@@ -936,10 +969,18 @@ async def readability_auditor_node(state: AgentState) -> Dict[str, Any]:
 
 
 def should_continue(state: AgentState) -> str:
-    """Conditional routing edge."""
+    """Conditional routing edge from agent reasoning node."""
     last_msg = state["messages"][-1]
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
         return "tools"
+    return "readability"
+
+
+def route_after_tools(state: AgentState) -> str:
+    """If tools returned ToolMessages and an LLM is active, route back to agent for conversational synthesis."""
+    last_msg = state["messages"][-1]
+    if isinstance(last_msg, ToolMessage) or (hasattr(last_msg, "tool_call_id") and getattr(last_msg, "tool_call_id", None)):
+        return "agent"
     return "readability"
 
 
@@ -960,7 +1001,14 @@ def build_commerce_agent_graph() -> StateGraph:
             "readability": "readability"
         }
     )
-    workflow.add_edge("tools", "readability")
+    workflow.add_conditional_edges(
+        "tools",
+        route_after_tools,
+        {
+            "agent": "agent",
+            "readability": "readability"
+        }
+    )
     workflow.add_edge("readability", END)
 
     return workflow.compile()
