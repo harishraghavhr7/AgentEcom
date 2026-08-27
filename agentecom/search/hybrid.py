@@ -39,11 +39,19 @@ class HybridSearchEngine:
     ) -> bool:
         if category and product.get("category", "").lower() != category.lower():
             return False
-        price = product.get("price", 0.0)
-        if min_price is not None and price < min_price:
-            return False
-        if max_price is not None and price > max_price:
-            return False
+        price = float(product.get("price", 0.0))
+        if min_price is not None:
+            try:
+                if price < float(min_price):
+                    return False
+            except (ValueError, TypeError):
+                pass
+        if max_price is not None:
+            try:
+                if price > float(max_price):
+                    return False
+            except (ValueError, TypeError):
+                pass
         return True
 
     def search_bm25_only(
@@ -54,7 +62,14 @@ class HybridSearchEngine:
         min_price: Optional[float] = None,
         max_price: Optional[float] = None
     ) -> List[Dict[str, Any]]:
-        raw_results = self.bm25_retriever.search(query, top_k=top_k * 2)
+        try:
+            top_k = int(top_k) if top_k is not None else 10
+        except (ValueError, TypeError):
+            top_k = 10
+        if top_k <= 0:
+            return []
+
+        raw_results = self.bm25_retriever.search(query, top_k=int(top_k * 2))
         filtered = []
         for prod, score in raw_results:
             if self._apply_filters(prod, category, min_price, max_price):
@@ -74,7 +89,14 @@ class HybridSearchEngine:
         min_price: Optional[float] = None,
         max_price: Optional[float] = None
     ) -> List[Dict[str, Any]]:
-        raw_results = self.dense_retriever.search(query, top_k=top_k * 2)
+        try:
+            top_k = int(top_k) if top_k is not None else 10
+        except (ValueError, TypeError):
+            top_k = 10
+        if top_k <= 0:
+            return []
+
+        raw_results = self.dense_retriever.search(query, top_k=int(top_k * 2))
         filtered = []
         for prod, score in raw_results:
             if self._apply_filters(prod, category, min_price, max_price):
@@ -99,6 +121,13 @@ class HybridSearchEngine:
         then combine ranks via Reciprocal Rank Fusion (RRF).
         Handles broad/wildcard queries by returning catalog products.
         """
+        try:
+            top_k = int(top_k) if top_k is not None else 10
+        except (ValueError, TypeError):
+            top_k = 10
+        if top_k <= 0:
+            return []
+
         start_time = time.perf_counter()
         clean_q = query.strip()
 
@@ -118,8 +147,8 @@ class HybridSearchEngine:
             return results
 
         # Retrieve candidates from both systems (oversample to allow rank blending)
-        bm25_candidates = self.bm25_retriever.search(clean_q, top_k=top_k * 3)
-        dense_candidates = self.dense_retriever.search(clean_q, top_k=top_k * 3)
+        bm25_candidates = self.bm25_retriever.search(clean_q, top_k=int(top_k * 3))
+        dense_candidates = self.dense_retriever.search(clean_q, top_k=int(top_k * 3))
 
         # SKU Map for RRF scoring
         sku_scores: Dict[str, Dict[str, Any]] = {}

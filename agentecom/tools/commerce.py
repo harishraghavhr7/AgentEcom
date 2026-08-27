@@ -10,11 +10,12 @@ Key architectural rules:
 
 import json
 import time
+import re
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from agentecom.db.database import AsyncSessionLocal
-from agentecom.db.models import Product, Inventory
+from agentecom.db.models import Product, Inventory, Order
 from agentecom.core.cache import cache
 from agentecom.search.hybrid import hybrid_engine
 from agentecom.core.checkout import checkout_manager, CheckoutError
@@ -81,6 +82,11 @@ async def tool_search_products(
     """
     start = time.perf_counter()
     await ensure_index_ready()
+
+    try:
+        limit = int(limit) if limit is not None else 5
+    except (ValueError, TypeError):
+        limit = 5
 
     # 1. Check search cache
     cache_key = cache._generate_search_key(query, {"cat": category, "min": min_price, "max": max_price, "lim": limit})
@@ -280,3 +286,55 @@ async def tool_confirm_checkout(
             }
         except CheckoutError as e:
             return {"error": e.message, "status_code": e.status_code}
+
+
+async def tool_get_orders(
+    order_number: Optional[str] = None,
+    customer_email: Optional[str] = None,
+    limit: int = 10
+) -> Dict[str, Any]:
+    """
+    Retrieve order details and purchase history by order number or list recent orders.
+    """
+    # Sanitize order_number in case LLM passes generic query strings or placeholders
+    if order_number:
+        ord_clean = str(order_number).strip()
+        ord_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', ord_clean, re.IGNORECASE)
+        if ord_match:
+            order_number = ord_match.group(1).upper()
+        elif ord_clean.upper().startswith("ORD-"):
+            order_number = ord_clean.upper()
+        elif ord_clean.lower() in ["", "none", "null", "all", "orders", "my orders", "all orders", "undefined"]:
+            order_number = None
+        elif len(ord_clean.split()) > 1:  # Text sentence rather than an order id code
+            order_number = None
+
+    async with AsyncSessionLocal() as db:
+        stmt = select(Order)
+        if order_number:
+            stmt = stmt.where(Order.order_number == order_number)
+        elif customer_email:
+            stmt = stmt.where(Order.customer_email == customer_email)
+        
+        stmt = stmt.order_by(Order.created_at.desc()).limit(limit)
+        res = await db.execute(stmt)
+        orders = res.scalars().all()
+
+        orders_data = []
+        for o in orders:
+            try:
+                items = json.loads(o.items_json)
+            except Exception:
+                items = []
+            orders_data.append({
+                "order_number": o.order_number,
+                "status": o.status.value if hasattr(o.status, "value") else str(o.status),
+                "total_amount": o.total_amount,
+                "items": items,
+                "customer_email": o.customer_email,
+                "checkout_session_id": o.checkout_session_id,
+                "idempotency_key": o.idempotency_key,
+                "created_at": o.created_at.strftime("%Y-%m-%d %H:%M:%S") if o.created_at else None
+            })
+        
+        return {"orders": orders_data, "count": len(orders_data)}

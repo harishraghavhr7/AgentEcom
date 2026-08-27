@@ -24,19 +24,20 @@ async def reset_cache_and_search():
     cache.metrics.invalidations = 0
     cache.metrics.total_read_time_ms = 0.0
 
-    prod_dicts = [
-        {
-            "id": i + 1,
-            "sku": p["sku"],
-            "name": p["name"],
-            "description": p["description"],
-            "category": p["category"],
-            "price": p["price"],
-            "attributes_json": str(p.get("attributes", {}))
-        }
-        for i, p in enumerate(SAMPLE_PRODUCTS)
-    ]
-    hybrid_engine.build_index(prod_dicts)
+    if not hybrid_engine.is_indexed:
+        prod_dicts = [
+            {
+                "id": i + 1,
+                "sku": p["sku"],
+                "name": p["name"],
+                "description": p["description"],
+                "category": p["category"],
+                "price": p["price"],
+                "attributes_json": str(p.get("attributes", {}))
+            }
+            for i, p in enumerate(SAMPLE_PRODUCTS)
+        ]
+        hybrid_engine.build_index(prod_dicts)
     yield
 
 @pytest_asyncio.fixture

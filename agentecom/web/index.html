@@ -37,8 +37,8 @@
             <div class="flex items-center gap-1.5 bg-slate-800/90 px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
                 <span class="text-slate-400">Provider:</span>
                 <select id="providerSelect" onchange="handleProviderChange()" class="bg-slate-900 text-cyan-300 font-medium border-0 focus:outline-none cursor-pointer rounded px-1.5 py-0.5">
+                    <option value="ollama" selected>🦙 Ollama (Local)</option>
                     <option value="local">⚡ Local Zero-Key</option>
-                    <option value="ollama">🦙 Ollama (Local)</option>
                     <option value="groq">⚡ Groq API (Llama 3.3)</option>
                 </select>
             </div>
@@ -197,6 +197,19 @@
                 </div>
             </div>
 
+            <!-- Short-Term Working Memory Inspector -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-2 text-xs">
+                <div class="flex items-center justify-between">
+                    <h4 class="font-semibold text-slate-200 flex items-center gap-1.5">
+                        <span>🧠</span> Short-Term Working Memory
+                    </h4>
+                    <span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded font-mono border border-indigo-500/30">Active Context</span>
+                </div>
+                <div id="memoryContextDisplay" class="space-y-1.5 text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                    <p class="text-slate-500 italic">No active product focus yet. Mention a product or search to load context.</p>
+                </div>
+            </div>
+
             <!-- Idempotency & Isolation Tracker -->
             <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
                 <h4 class="font-semibold text-slate-300 flex items-center gap-1.5">
@@ -204,7 +217,7 @@
                 </h4>
                 <div class="space-y-1 text-slate-400">
                     <p>Session: <code id="activeSessionId" class="text-cyan-400 text-[11px]">-</code></p>
-                    <p>Active LLM: <code id="activeModelLabel" class="text-slate-300 text-[11px]">Local Zero-Key</code></p>
+                    <p>Active LLM: <code id="activeModelLabel" class="text-cyan-300 text-[11px]">🦙 Ollama (Local)</code></p>
                 </div>
             </div>
 
@@ -295,7 +308,8 @@
                         session_id: currentSessionId,
                         llm_provider: provider,
                         llm_api_key: groqKey || undefined,
-                        model_name: modelName || undefined
+                        model_name: modelName || undefined,
+                        ollama_base_url: ollamaUrl || undefined
                     })
                 });
 
@@ -384,6 +398,61 @@
                 document.getElementById('metricToolTokens').textContent = r.compressed_tool_tokens;
             }
 
+            // Update Short-Term Working Memory Section
+            const memContainer = document.getElementById('memoryContextDisplay');
+            const mem = data.short_term_memory;
+            if (mem && (mem.active_product || mem.active_order || (mem.recent_skus && mem.recent_skus.length > 0))) {
+                let memHtml = '';
+                if (mem.active_order) {
+                    memHtml += `
+                        <div class="space-y-1 mb-2">
+                            <span class="text-[10px] text-amber-400 font-semibold uppercase tracking-wide">Active Order Context:</span>
+                            <div class="bg-slate-900 border border-slate-800 p-2 rounded">
+                                <div class="font-mono text-cyan-300 text-[11px] font-semibold">${escapeHtml(mem.active_order.order_number || '')}</div>
+                                <div class="flex justify-between text-[10px] text-slate-400 mt-0.5">
+                                    <span>${escapeHtml(mem.active_order.created_at || 'Recently')}</span>
+                                    <span class="text-emerald-400 font-bold">$${(mem.active_order.total_amount || 0).toFixed(2)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+                if (mem.active_product) {
+                    const attrsList = mem.active_product.attributes ? Object.entries(mem.active_product.attributes).slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(', ') : '';
+                    memHtml += `
+                        <div class="space-y-1">
+                            <span class="text-[10px] text-indigo-400 font-semibold uppercase tracking-wide">Active Focus Product:</span>
+                            <div class="bg-slate-900 border border-slate-800 p-2 rounded">
+                                <div class="font-medium text-white line-clamp-1">${escapeHtml(mem.active_product.name || '')}</div>
+                                <div class="flex justify-between text-[10px] text-slate-400 font-mono mt-0.5">
+                                    <span>${escapeHtml(mem.active_product.sku || '')}</span>
+                                    <span class="text-emerald-400 font-bold">$${(mem.active_product.price || 0).toFixed(2)}</span>
+                                </div>
+                                ${attrsList ? `<div class="text-[9px] text-slate-400 mt-1 italic line-clamp-1">${escapeHtml(attrsList)}</div>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }
+                if (mem.recent_skus && mem.recent_skus.length > 0) {
+                    memHtml += `
+                        <div class="pt-1">
+                            <span class="text-[10px] text-slate-400">Recent Context SKUs:</span>
+                            <div class="flex flex-wrap gap-1 mt-1">
+                                ${mem.recent_skus.map(s => `<span class="bg-slate-900 text-cyan-300 font-mono text-[10px] px-1.5 py-0.5 rounded border border-slate-800">${escapeHtml(s)}</span>`).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+                if (mem.recent_queries && mem.recent_queries.length > 0) {
+                    memHtml += `
+                        <div class="pt-1 text-[10px] text-slate-400">
+                            <span>Last Search:</span> <span class="text-slate-300 font-medium">${escapeHtml(mem.recent_queries[mem.recent_queries.length - 1])}</span>
+                        </div>
+                    `;
+                }
+                memContainer.innerHTML = memHtml;
+            }
+
             // Update Tool Call Traces
             const traceContainer = document.getElementById('toolCallTrace');
             if (data.tool_calls_made && data.tool_calls_made.length > 0) {
@@ -440,6 +509,7 @@
             document.getElementById('cartCountBadge').textContent = '0 items';
             document.getElementById('cartTotalSection').classList.add('hidden');
             document.getElementById('cartCheckoutBtn').classList.add('hidden');
+            document.getElementById('memoryContextDisplay').innerHTML = `<p class="text-slate-500 italic">No active product focus yet. Mention a product or search to load context.</p>`;
             document.getElementById('toolCallTrace').innerHTML = `<div class="p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-slate-400">Session cleared.</div>`;
             
             appendAssistantMessage("Session reset. How can I help you with shopping today?");

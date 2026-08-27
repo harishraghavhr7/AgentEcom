@@ -50,6 +50,14 @@ class BM25Retriever:
         if not self.bm25 or not self.corpus_docs:
             return []
 
+        try:
+            top_k = int(top_k) if top_k is not None else 10
+        except (ValueError, TypeError):
+            top_k = 10
+
+        if top_k <= 0:
+            return []
+
         query_tokens = tokenize(query)
         if not query_tokens:
             return []

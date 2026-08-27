@@ -61,6 +61,14 @@ class DenseRetriever:
         if self.doc_embeddings is None or not self.corpus_docs:
             return []
 
+        try:
+            top_k = int(top_k) if top_k is not None else 10
+        except (ValueError, TypeError):
+            top_k = 10
+
+        if top_k <= 0:
+            return []
+
         query_vec = self.encode_text(query)
         # Cosine similarity is dot product of normalized vectors
         scores = np.dot(self.doc_embeddings, query_vec)

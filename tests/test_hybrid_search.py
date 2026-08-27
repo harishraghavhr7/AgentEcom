@@ -29,3 +29,16 @@ async def test_price_filtering():
     results = hybrid_engine.search_hybrid("sweater", max_price=50.0, top_k=5)
     for p in results:
         assert p["price"] <= 50.0
+
+@pytest.mark.asyncio
+async def test_float_and_non_int_top_k():
+    # Test float top_k (e.g. from LLM / tool call serialization)
+    results_float = hybrid_engine.search_hybrid("sweater", top_k=5.0)
+    assert len(results_float) > 0
+
+    # Test BM25 and dense isolated search with float top_k
+    bm25_res = hybrid_engine.search_bm25_only("sweater", top_k=5.0)
+    assert len(bm25_res) > 0
+
+    dense_res = hybrid_engine.search_dense_only("sweater", top_k=5.0)
+    assert len(dense_res) > 0
