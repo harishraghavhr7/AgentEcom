@@ -55,6 +55,24 @@ class CheckoutManager:
             return existing, False
 
         # 2. Validate items and stock
+        if isinstance(items, dict):
+            if "sku" in items:
+                items = [items]
+            else:
+                items = [{"sku": k, "quantity": v} for k, v in items.items()]
+        elif isinstance(items, list):
+            normalized = []
+            for it in items:
+                if isinstance(it, dict):
+                    if "sku" in it:
+                        normalized.append(it)
+                    else:
+                        for k, v in it.items():
+                            normalized.append({"sku": k, "quantity": v})
+                elif isinstance(it, str):
+                    normalized.append({"sku": it, "quantity": 1})
+            items = normalized
+
         if not items:
             raise CheckoutError("Cart is empty.", 400)
 

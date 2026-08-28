@@ -41,37 +41,102 @@ from agentecom.core.cache import cache
 
 SYSTEM_PROMPT = """You are a warm, knowledgeable, proactive, and friendly Autonomous AI Shopping Assistant for AgentEcom.
 You have access to fast, idempotent commerce tools:
-- `search_products`: Hybrid lexical + semantic search for products (handles exact SKUs, names, descriptions, categories, and price constraints).
-- `get_product_details`: Get full product specs, pricing, attributes, and live inventory by SKU.
-- `check_inventory_stock`: Check availability for a list of SKUs.
+- `search_products`: Search for products in catalog. Use this to find, browse, or recommend products.
+- `get_product_details`: Get full product specs, pricing, attributes (warranty, material, dimensions, battery), and live inventory by SKU.
+- `check_inventory_stock`: Check availability and live stock count for a list of SKUs.
 - `add_to_cart`: Add products to user cart by SKU and quantity.
-- `get_order_history`: Retrieve purchase history, order details, and tracking for user orders.
-- `create_checkout_session`: Create an isolated short-lived checkout session for items.
+- `get_order_history`: Look up past orders, purchase history, order details, order numbers, order dates, and tracking information.
+- `create_checkout_session`: Create an isolated short-lived checkout session for items in the cart.
 - `confirm_checkout_order`: Confirm and place an order idempotently.
 
-Tool Usage Rules:
-- When the user asks for details, specs, or info for an exact SKU code (e.g. 'Details for SKU-4471', 'Details for FLEX-E7-DESK'), always call `get_product_details(sku=...)`.
-- When the user asks to browse, search, or recommend products (e.g. 'Find a cozy knit sweater under $60'), call `search_products`.
-- When the user asks to check inventory or stock, call `check_inventory_stock`.
-- When the user asks to add an item to the cart or buy, call `add_to_cart`.
-- When the user asks to view order history or past orders, call `get_order_history`.
-- When the user asks to proceed to checkout, call `create_checkout_session`.
-- When the user confirms their order or purchase, call `confirm_checkout_order`.
+CRITICAL INTENT ROUTING RULES:
+1. ORDER HISTORY & TRACKING INTENT:
+   - Whenever the user asks about past orders, previous purchases, order status, order placement dates/times, order IDs, or order details (e.g. 'get me informations of my previous order', 'show all my orders', 'what did I buy', 'order status', 'track ORD-XXXX', 'when did I purchase it'):
+     -> ALWAYS CALL `get_order_history`.
+     -> NEVER confuse order history inquiries with product catalog searches!
+2. PRODUCT SEARCH & BROWSE INTENT:
+   - When the user asks to browse, find, recommend, or search products:
+     -> Call `search_products(query=..., max_price=..., category=...)`.
+     -> If the user only provides a price constraint (e.g. 'under $300', 'cheaper options'), set the `query` argument to the previous search topic from Conversational Working Memory.
+3. PRODUCT SPECIFICATIONS & DETAILS INTENT:
+   - When the user asks for details, specs, warranty, material, or info for a specific SKU or the active product:
+     -> Call `get_product_details(sku=...)`.
+4. STOCK & INVENTORY INTENT:
+   - When the user asks 'how many in stock', 'is it available', or 'units left':
+     -> Call `check_inventory_stock(skus=[...])`.
+5. ADD TO CART INTENT:
+   - When the user says 'add to cart', 'add this product to the cart', 'add it', 'buy this':
+     -> Call `add_to_cart(sku=..., quantity=...)`.
+6. CHECKOUT & CONFIRMATION:
+   - When the user says 'checkout' or 'proceed to checkout': call `create_checkout_session`.
+   - When the user confirms ('confirm order', 'confirm purchase', 'place order', 'pay now'): call `confirm_checkout_order`.
 
 Interactive Response Guidelines:
-1. Speak naturally, warmly, and conversationally. Avoid stiff or repetitive robotic templates.
-2. When presenting product search results or recommendations:
-   - Highlight why the products match what the user is looking for.
-   - Always emphasize product names, SKU codes (e.g. `**SKU-4471**`), and prices in bold.
-   - Mention key selling points, specifications, or warranty and ask a helpful follow-up question (e.g. offering more details or asking if they'd like to add it to their cart).
-3. When an order is placed:
-   - Celebrate and thank the user warmly!
-   - Clearly state the **Order Number** (e.g. `**ORD-XXXX**`), items, and total paid.
-   - Reassure them that inventory is securely reserved.
-4. When answering questions regarding entity attributes (e.g. 'when did I purchase it', 'what is the warranty', 'what material'):
-   - Provide a direct, helpful answer using the entity details in Conversational Working Memory.
-5. Keep answers engaging, clear, and actionable.
+- Speak naturally, warmly, and conversationally.
+- When presenting product search results, emphasize product names, SKU codes (e.g. `**SKU-4471**`), and prices in bold.
+- Celebrate order placements with order number (`**ORD-XXXX**`) and summary.
 """
+
+def extract_json_tool_calls(content: str) -> List[Dict[str, Any]]:
+    """
+    Extracts structured tool calls from LLM text responses that output JSON tool blocks.
+    Supports <tool_call> tags, ```json markdown blocks, or raw JSON objects.
+    """
+    if not content:
+        return []
+    
+    tool_calls = []
+
+    # 1. Check for <tool_call>...</tool_call>
+    tag_matches = re.findall(r'<tool_call>(.*?)</tool_call>', content, re.DOTALL | re.IGNORECASE)
+    for tm in tag_matches:
+        try:
+            data = json.loads(tm.strip())
+            name = data.get("name") or data.get("tool")
+            args = data.get("args") or data.get("parameters") or {}
+            if name:
+                tool_calls.append({"name": name, "args": args, "id": f"call_{uuid.uuid4().hex[:8]}"})
+        except Exception:
+            pass
+
+    if tool_calls:
+        return tool_calls
+
+    # 2. Check for ```json ... ``` code blocks
+    code_matches = re.findall(r'```(?:json)?\s*([\{\[].*?[\}\]])\s*```', content, re.DOTALL | re.IGNORECASE)
+    for cm in code_matches:
+        try:
+            data = json.loads(cm.strip())
+            if isinstance(data, dict):
+                name = data.get("name") or data.get("tool")
+                args = data.get("args") or data.get("parameters") or {}
+                if name:
+                    tool_calls.append({"name": name, "args": args, "id": f"call_{uuid.uuid4().hex[:8]}"})
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        name = item.get("name") or item.get("tool")
+                        args = item.get("args") or item.get("parameters") or {}
+                        if name:
+                            tool_calls.append({"name": name, "args": args, "id": f"call_{uuid.uuid4().hex[:8]}"})
+        except Exception:
+            pass
+
+    if tool_calls:
+        return tool_calls
+
+    # 3. Check for standalone JSON dict in text
+    json_candidate = re.search(r'\{\s*"(?:tool|name)"\s*:\s*"([^"]+)"\s*,\s*"(?:args|parameters)"\s*:\s*(\{.*?\})\s*\}', content, re.DOTALL)
+    if json_candidate:
+        try:
+            name = json_candidate.group(1)
+            args = json.loads(json_candidate.group(2))
+            tool_calls.append({"name": name, "args": args, "id": f"call_{uuid.uuid4().hex[:8]}"})
+        except Exception:
+            pass
+
+    return tool_calls
+
 
 def get_llm_model(provider: str = "ollama", model_name: Optional[str] = None, groq_api_key: Optional[str] = None, ollama_base_url: Optional[str] = None):
     """
@@ -189,52 +254,66 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
 
             dynamic_prompt = SYSTEM_PROMPT
             if memory_lines:
-                dynamic_prompt += "\n\n[CONVERSATIONAL SHORT-TERM WORKING MEMORY WITH ENTITY ATTRIBUTES]\n" + "\n".join(memory_lines) + "\n*Rule: When the user asks about attributes, dates, status, or details of recently retrieved entities (e.g. 'when do I purchase it', 'when was it ordered', 'what is the order date', 'what is the order status', 'how much did I pay', 'what are the specs/attributes', 'what is the warranty', 'what material is it made of', etc.), answer directly from the entity details in Conversational Working Memory without calling search_products.*"
+                dynamic_prompt += "\n\n[CONVERSATIONAL SHORT-TERM WORKING MEMORY WITH ENTITY ATTRIBUTES]\n" + "\n".join(memory_lines) + "\n*Rule: When the user asks about attributes, dates, status, or details of recently placed/retrieved orders, answer directly from order working memory or call get_order_history without calling search_products.*"
 
             messages = [SystemMessage(content=dynamic_prompt)] + list(state["messages"])
             response = await llm_with_tools.ainvoke(messages)
+            
+            # Check native tool calls
             if getattr(response, "tool_calls", None):
                 return {"messages": [response]}
             
-            # If we just executed a tool or LLM generated a direct answer, return the LLM synthesized reply
+            # Check extracted JSON tool calls in text content
+            extracted_calls = extract_json_tool_calls(getattr(response, "content", ""))
+            if extracted_calls:
+                return {"messages": [AIMessage(content="", tool_calls=extracted_calls)]}
+
+            # If we just executed a tool, LLM synthesized response is complete
             last_is_tool = isinstance(state["messages"][-1], ToolMessage) or (hasattr(state["messages"][-1], "tool_call_id") and getattr(state["messages"][-1], "tool_call_id", None))
-            if last_is_tool or not any(w in low for w in ["add", "cart", "checkout", "confirm", "buy", "stock", "find", "search", "details", "product", "order", "orders", "track", "history"]):
+            if last_is_tool:
+                tool_content = state["messages"][-1].content
+                if response.content and any(w in response.content.lower() for w in ["order", "purchase", "product", "item", "cart", "checkout", "stock", "found", "total", "session", "placed", "confirmed", "price"]):
+                    return {"messages": [response]}
+                return {"messages": [AIMessage(content=tool_content)]}
+
+            # Detect if user requested an actionable commerce action
+            sku_match = re.search(r'\b([A-Z0-9]{3,8}-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
+            order_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
+            commerce_action_detected = bool(
+                re.search(r'\b(find|search|show|browse|details?|specs?|order|orders|purchase|cart|checkout|confirm|stock|stocks|under|below|less\s+than|buy|pay|what\s+are|catalog)\b', low)
+                or sku_match or order_match
+            )
+            # If purely conversational with no commerce action, return the LLM response
+            if not commerce_action_detected and response.content:
                 return {"messages": [response]}
         except Exception:
             pass
 
-    # Deterministic Local Tool Planner with Short-Term Working Memory
+    # If the last message was a tool execution result and LLM is unavailable, return synthesized ToolMessage content
+    last_is_tool = isinstance(state["messages"][-1], ToolMessage) or (hasattr(state["messages"][-1], "tool_call_id") and getattr(state["messages"][-1], "tool_call_id", None))
+    if last_is_tool:
+        return {"messages": [AIMessage(content=state["messages"][-1].content)]}
+
+    # Deterministic Local Tool Planner & Intent Router (Zero-Key / Offline Fallback)
     tool_calls = []
 
     # Detect explicit SKU matches and Order numbers in the text
     sku_match = re.search(r'\b([A-Z0-9]{3,8}-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
     order_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
 
-    # 1. Order Entity Attribute & Date/Time Questions (e.g. "when do i purchase it", "when was it ordered", "order date")
-    is_order_date_q = (
-        any(w in low for w in [
-            "when do i purchase", "when did i purchase", "when was it purchased", "when was it ordered",
-            "when did i buy", "when was this placed", "when did i place", "purchase date", "order date",
-            "date of purchase", "date of order", "time of purchase", "time of order", "order placed on",
-            "when placed", "when was this order placed", "order time", "when did i order"
-        ])
-        or (any(w in low for w in ["when did i", "when do i", "when was"]) and any(w in low for w in ["purchase", "buy", "order", "place"]))
+    # 1. Order Entity Attribute & Placement Date/Time/Cost Questions (e.g. "when do i purchase it", "when was it ordered", "order date", "how much did i pay")
+    is_order_date_q = bool(
+        re.search(r'\b(when\s+(?:did|was|do)\s+i\s+(?:buy|purchase|order|place)|when\s+placed|order\s+date|purchase\s+date|date\s+of\s+(?:purchase|order)|time\s+of\s+(?:purchase|order)|order\s+placed\s+on|order\s+time)\b', low)
+        or (re.search(r'\b(when\s+did\s+i|when\s+do\s+i|when\s+was)\b', low) and re.search(r'\b(purchase|buy|order|place)\b', low))
     )
 
-    is_order_cost_q = (
-        any(w in low for w in [
-            "how much did i pay", "how much was it", "what did it cost", "total paid", "order total",
-            "total amount paid", "what did i spend"
-        ]) and not any(w in low for w in ["under", "below", "less than", "budget", "for under"])
+    is_order_cost_q = bool(
+        re.search(r'\b(how\s+much\s+did\s+i\s+pay|how\s+much\s+was\s+it|what\s+did\s+it\s+cost|total\s+paid|order\s+total|total\s+amount\s+paid|what\s+did\s+i\s+spend)\b', low)
+        and not re.search(r'\b(under|below|less\s+than|budget|for\s+under)\b', low)
     )
 
-    is_order_status_q = any(w in low for w in [
-        "status of my order", "status of the order", "is it confirmed", "is my order confirmed", "tracking status"
-    ])
-
-    is_order_id_q = any(w in low for w in [
-        "idempotency key", "order id", "order number", "customer email", "order reference"
-    ]) and not any(w in low for w in ["confirm", "checkout", "pay"])
+    is_order_status_q = bool(re.search(r'\b(status\s+of\s+(?:my\s+|the\s+)?order|is\s+(?:my\s+|the\s+)?order\s+confirmed|tracking\s+status)\b', low))
+    is_order_id_q = bool(re.search(r'\b(idempotency\s+key|order\s+id|order\s+number|customer\s+email|order\s+reference)\b', low) and not re.search(r'\b(confirm|checkout|pay)\b', low))
 
     if is_order_date_q or is_order_cost_q or is_order_status_q or is_order_id_q:
         target_ord = active_order
@@ -295,20 +374,13 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
         else:
             return {"messages": [AIMessage(content="You have not placed any orders in this session yet.\n\n💡 *Browse our catalog or search for items to place your first order!*")]}
 
-    # 2. General Order History Inquiry
+    # 2. General Order History / Previous Orders Inquiry (Flexible semantic matching)
     elif (
-        any(w in low for w in [
-            "my order", "my orders", "all my orders", "all orders", "past orders", "previous orders",
-            "order history", "purchase history", "my purchases", "track order", "track my order",
-            "order status", "informations of all my orders", "information of all my orders",
-            "information of my orders", "information about my orders", "information about my order", "information about the order",
-            "about my orders", "about my order", "about the order", "order detail", "order details", "order info",
-            "order information", "show orders", "show order", "list orders", "list order", "view orders", "view order",
-            "check my order", "check orders", "check order", "where is my order", "what did i buy", "what have i bought",
-            "purchased items", "orders placed", "placed orders"
-        ])
-        or (low.strip() in ["orders", "order", "my order", "my orders"])
-        or (order_match and not any(w in low for w in ["confirm", "checkout", "pay"]))
+        bool(re.search(r'\b(?:previous|past|last|my|all|recent)?\s*orders?\b', low))
+        or bool(re.search(r'\b(?:order|purchase)\s*(?:history|details?|info|informations?|status|tracking)\b', low))
+        or bool(re.search(r'\b(?:informations?|details?|info|status|track|tracking|history)\s+(?:of|about|for)\s+(?:all\s+|my\s+|the\s+|all\s+my\s+|previous\s+|past\s+|recent\s+)?orders?\b', low))
+        or bool(re.search(r'\bwhat\s+(?:did\s+i\s+(?:buy|purchase)|have\s+i\s+bought|orders?\s+placed)\b', low))
+        or (order_match and not bool(re.search(r'\b(confirm|checkout|pay)\b', low)))
     ):
         ord_num = order_match.group(1).upper() if order_match else None
         tool_calls.append({
@@ -319,12 +391,7 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
 
     # 3. Product Entity Attributes & Specifications Questions (e.g. warranty, material, dimensions, battery, specs)
     elif (
-        any(w in low for w in [
-            "warranty", "material", "dimensions", "weight", "specs of this", "specs for this", "what are the specs",
-            "specifications", "attributes of this", "product attributes", "height range", "weight capacity",
-            "battery life", "connectivity", "color options", "what motor", "how much warranty"
-        ])
-        or (any(w in low for w in ["what is the", "tell me about the", "how about the", "what are the"]) and any(w in low for w in ["warranty", "material", "dimensions", "weight", "specs", "attributes", "features", "battery", "color", "specs"]))
+        bool(re.search(r'\b(warranty|material|materials|dimensions?|weights?|specs?|specifications?|batter(?:y|ies)|attributes?|features?|colors?|height\s+range|weight\s+capacity)\b', low))
     ) and (sku_match or active_prod or recent_skus or retrieved_prods):
         target_p = None
         if sku_match:
@@ -339,7 +406,6 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
 
         if target_p:
             attrs = target_p.get("attributes", {})
-            # Look for specific attribute match
             matched_attr = None
             for k, v in attrs.items():
                 if k.lower() in low or any(word in low for word in k.lower().split()):
@@ -363,7 +429,7 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             return {"messages": [ai_msg]}
 
     # 4. Confirm Order Placement
-    elif any(w in low for w in ["confirm order", "confirm purchase", "place order", "place the order", "place my order", "finalize checkout", "pay now", "confirm checkout", "order now"]):
+    elif bool(re.search(r'\b(confirm\s+(?:order|purchase|checkout)|place\s+(?:the\s+|my\s+)?order|finalize\s+checkout|pay\s+now|confirm\s+checkout|order\s+now)\b', low)):
         sess_id = state.get("checkout_session", {}).get("session_id") if state.get("checkout_session") else "active_session"
         tool_calls.append({
             "name": "confirm_checkout_order",
@@ -371,7 +437,7 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             "id": f"call_{uuid.uuid4().hex[:8]}"
         })
     # 5. Checkout Session Initiation
-    elif any(w in low for w in ["checkout", "proceed to checkout", "create checkout", "buy now", "pay"]):
+    elif bool(re.search(r'\b(proceed\s+to\s+checkout|create\s+checkout|checkout|buy\s+now|ready\s+to\s+pay)\b', low)):
         cart_items = [{"sku": i["sku"], "quantity": i["quantity"]} for i in state.get("cart", [])]
         if not cart_items and (sku_match or active_prod):
             target_sku = sku_match.group(1).upper() if sku_match else active_prod["sku"]
@@ -383,11 +449,7 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
                 "id": f"call_{uuid.uuid4().hex[:8]}"
             })
     # 6. Add to Cart (with explicit SKU OR short-term memory pronoun resolution)
-    elif any(w in low for w in [
-        "add to cart", "add this to cart", "add this product to the cart", "add this product", "add this",
-        "add it to cart", "add it", "put in cart", "put this in cart", "add to my cart", "put in my cart",
-        "buy this", "order this", "i'll take this", "i will take this", "add "
-    ]):
+    elif bool(re.search(r'\b(add\s+to\s+(?:my\s+)?cart|put\s+(?:this\s+|it\s+)?in\s+(?:my\s+)?cart|add\s+(?:this\s+product|this|it|item|sku)|buy\s+this|order\s+this|i(?:\'ll|\s+will)\s+take\s+this|add\s+)\b', low)):
         target_sku = None
         if sku_match:
             target_sku = sku_match.group(1).upper()
@@ -410,12 +472,8 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             )
             return {"messages": [ai_msg]}
 
-    # 4. Stock Availability & Inventory Check (with explicit SKU OR short-term memory resolution)
-    elif any(w in low for w in [
-        "stock", "stocks", "how many available", "available", "availability", "how much left",
-        "how many left", "units left", "in stock", "out of stock", "how many items", "how many units",
-        "inventory", "how many stocks", "stocks available", "stock available", "stocks avaialable", "stock avaialable"
-    ]) and (sku_match or active_prod or recent_skus or retrieved_prods):
+    # 7. Stock Availability & Inventory Check (with explicit SKU OR short-term memory resolution)
+    elif bool(re.search(r'\b(stocks?|available|availability|units?\s+left|how\s+many\s+left|how\s+many\s+available|how\s+many\s+stocks|in\s+stock|out\s+of\s+stock|inventory|how\s+much\s+left)\b', low)) and (sku_match or active_prod or recent_skus or retrieved_prods):
         target_sku = None
         if sku_match:
             target_sku = sku_match.group(1).upper()
@@ -439,12 +497,8 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
                 "id": f"call_{uuid.uuid4().hex[:8]}"
             })
 
-    # 5. Product Details / Inquiry (with explicit SKU OR short-term memory resolution)
-    elif (sku_match and len(last_msg.split()) <= 4) or any(w in low for w in [
-        "details for this", "details of this", "tell me more about this", "tell me more about it",
-        "more info on this", "specs of this", "show details", "is it available", "how much is this",
-        "what is the price", "price of this", "how much does it cost"
-    ]):
+    # 8. Product Details / Inquiry (with explicit SKU OR short-term memory resolution)
+    elif (sku_match and len(last_msg.split()) <= 4) or bool(re.search(r'\b(details?\s+(?:for|of)\s+this|tell\s+me\s+more|more\s+info|specs?\s+of\s+this|show\s+details?|how\s+much\s+is\s+this|what\s+is\s+the\s+price|price\s+of\s+this|how\s+much\s+does\s+it\s+cost)\b', low)):
         target_sku = None
         if sku_match:
             target_sku = sku_match.group(1).upper()
@@ -467,23 +521,17 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             )
             return {"messages": [ai_msg]}
 
-    # 6. Product Search & Contextual Follow-up Refinements
+    # 9. Product Search & Contextual Follow-up Refinements
     elif (
-        any(w in low for w in [
-            "product", "products", "item", "items", "catalog", "browse", "what do you have",
-            "what are", "available", "store", "sell", "find", "search", "looking for",
-            "show me", "sweater", "headphone", "headphones", "chair", "desk", "keyboard", "monitor",
-            "kettle", "mouse", "jacket", "shirt", "coffee", "under", "below", "cheap", "all",
-            "cheaper", "more like", "options", "shoes", "boots", "bag", "skincare", "camera"
-        ])
-        or bool(re.search(r'(?:under|less than|max|below|cheaper than)\s*\$?\d+', low))
+        bool(re.search(r'\b(products?|items?|catalog|browse|what\s+do\s+you\s+have|what\s+are|store|sell|find|search|looking\s+for|show\s+me|sweaters?|headphones?|chairs?|desks?|keyboards?|monitors?|kettles?|mouses?|mice|jackets?|shirts?|coffee|shoes?|boots?|bags?|skincare|cameras?)\b', low))
+        or bool(re.search(r'(?:under|less\s+than|max|below|cheaper\s+than)\s*\$?\d+', low))
     ):
         max_p = None
-        p_match = re.search(r'(?:under|less than|max|below|cheaper than)\s*\$?(\d+(?:\.\d+)?)', low)
+        p_match = re.search(r'(?:under|less\s+than|max|below|cheaper\s+than)\s*\$?(\d+(?:\.\d+)?)', low)
         clean_q = last_msg
         if p_match:
             max_p = float(p_match.group(1))
-            clean_q = re.sub(r'(?:under|less than|max|below|cheaper than)\s*\$?\d+(?:\.\d+)?', '', clean_q, flags=re.IGNORECASE).strip()
+            clean_q = re.sub(r'(?:under|less\s+than|max|below|cheaper\s+than)\s*\$?\d+(?:\.\d+)?', '', clean_q, flags=re.IGNORECASE).strip()
 
         for prefix in [
             "what are the products there", "what are the products", "what products do you have",
@@ -515,7 +563,8 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
                 "I can:\n"
                 "- Search catalog (e.g. *'Show all products'*, *'Find a cozy knit sweater under $60'*, or *'Show me noise canceling headphones'*)\n"
                 "- Check product specs (e.g. *'Details for SKU-4471'* or *'Details for this'*)\n"
-                "- Manage cart & checkout (e.g. *'Add this product to the cart'* -> *'Checkout'* -> *'Confirm purchase'*)\n\n"
+                "- Manage cart & checkout (e.g. *'Add this product to the cart'* -> *'Checkout'* -> *'Confirm purchase'*)\n"
+                "- Track and view orders (e.g. *'Get me informations of my previous order'*)\n\n"
                 "What product can I find for you?"
             )
         )
@@ -551,13 +600,52 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
         tool_name = tc.get("name")
         args = tc.get("args", {})
         call_id = tc.get("id", str(uuid.uuid4()))
+        result_str = f"Executed {tool_name}."
 
         tool_traces.append({"tool": tool_name, "args": args})
 
         if tool_name == "search_products":
+            raw_max = args.get("max_price")
+            if isinstance(raw_max, dict):
+                raw_max = raw_max.get("value") or raw_max.get("$lte") or raw_max.get("max") or (next(iter(raw_max.values()), None) if raw_max else None)
+            try:
+                max_p = float(raw_max) if raw_max is not None else None
+            except (ValueError, TypeError):
+                max_p = None
+
+            q_text = str(args.get("query", "products")).strip()
+            # If query has price phrase, extract it if max_p is None and clean q_text
+            p_match = re.search(r'(?:under|less\s+than|max|below|cheaper\s+than)\s*\$?(\d+(?:\.\d+)?)', q_text, re.IGNORECASE)
+            if p_match:
+                if max_p is None:
+                    max_p = float(p_match.group(1))
+                q_text = re.sub(r'(?:under|less\s+than|max|below|cheaper\s+than)\s*\$?\d+(?:\.\d+)?', '', q_text, flags=re.IGNORECASE).strip()
+
+            # Clean search query prefixes
+            for prefix in [
+                "find me a", "find me", "find a", "find", "search for a", "search for", "search",
+                "show me a", "show me", "show all products", "show products", "show", "what are the products there",
+                "what are the products", "what products do you have", "browse catalog", "looking for a", "looking for",
+                "i am looking for", "can you show"
+            ]:
+                if q_text.lower().startswith(prefix):
+                    q_text = q_text[len(prefix):].strip()
+
+            last_user_msg = next((m.content for m in reversed(state.get("messages", [])) if isinstance(m, HumanMessage)), "")
+            is_pure_refinement = bool(re.match(r'^(?:under|below|less\s+than|cheaper\s+than|max)\s*\$?\d+$', last_user_msg.strip(), re.IGNORECASE)) or last_user_msg.strip().lower() in ["cheaper", "cheaper ones", "options", "more"]
+
+            # If user query is a pure price filter or empty refinement, inherit recent_queries
+            if (is_pure_refinement or not q_text or q_text.lower() in ["cheaper", "cheaper ones", "options", "more", "under", ""]) and short_term_memory.get("recent_queries"):
+                q_text = short_term_memory["recent_queries"][-1]
+            elif not q_text:
+                q_text = "products"
+
+            args["query"] = q_text
+            args["max_price"] = max_p
+
             res = await tool_search_products(
-                query=args.get("query", "products"),
-                max_price=args.get("max_price"),
+                query=q_text,
+                max_price=max_p,
                 category=args.get("category"),
                 limit=args.get("limit", 6)
             )
@@ -672,6 +760,8 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
                         lines.append(f"- **Attributes**: {', '.join([f'{k}: {v}' for k, v in attrs_dict.items()])}")
                     lines.append(f"- **Description**: {p['description']}")
                     result_str = "\n".join(lines)
+            else:
+                result_str = f"Product with SKU `{sku}` not found in catalog."
         elif tool_name == "add_to_cart":
             sku = args.get("sku", "")
             qty = args.get("quantity", 1)
@@ -708,9 +798,31 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
                 result_str = f"Product `{sku}` not found."
 
         elif tool_name == "create_checkout_session":
-            items = args.get("skus_and_quantities", [])
+            raw_items = args.get("skus_and_quantities") or args.get("items")
+            items = []
+            if isinstance(raw_items, dict):
+                if "sku" in raw_items:
+                    items.append({"sku": str(raw_items["sku"]), "quantity": int(raw_items.get("quantity", 1))})
+                else:
+                    for k, v in raw_items.items():
+                        items.append({"sku": str(k), "quantity": int(v) if str(v).isdigit() else 1})
+            elif isinstance(raw_items, list):
+                for it in raw_items:
+                    if isinstance(it, dict):
+                        if "sku" in it:
+                            items.append({"sku": str(it["sku"]), "quantity": int(it.get("quantity", 1))})
+                        else:
+                            for k, v in it.items():
+                                items.append({"sku": str(k), "quantity": int(v) if str(v).isdigit() else 1})
+                    elif isinstance(it, str):
+                        items.append({"sku": it, "quantity": 1})
+
             if not items and cart:
                 items = [{"sku": i["sku"], "quantity": i["quantity"]} for i in cart]
+            elif not items and active_prod and active_prod.get("sku"):
+                items = [{"sku": active_prod["sku"], "quantity": 1}]
+            elif not items and recent_skus:
+                items = [{"sku": recent_skus[0], "quantity": 1}]
             
             idem_key = f"idem_sess_{uuid.uuid4().hex[:8]}"
             res = await tool_create_checkout_session(items=items, idempotency_key=idem_key, ttl_minutes=15)
@@ -865,8 +977,12 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
             res = await tool_get_orders(order_number=ord_num, limit=lim)
             orders = res.get("orders", [])
 
-            # Also check session state for recently placed order
-            if state.get("order") and not any(o.get("order_number") == state["order"].get("order_number") for o in orders):
+            # Also check short-term memory and session state for active/recent orders
+            if not orders and short_term_memory.get("active_order"):
+                orders = [short_term_memory["active_order"]]
+            elif not orders and short_term_memory.get("recent_orders"):
+                orders = list(short_term_memory["recent_orders"])
+            elif state.get("order") and not any(o.get("order_number") == state["order"].get("order_number") for o in orders):
                 orders.insert(0, state["order"])
 
             if orders:

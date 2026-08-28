@@ -189,3 +189,33 @@ async def test_direct_place_the_order_from_cart_or_product(test_db_session):
     assert any(w in res2["reply"].lower() for w in ["order", "placed", "confirmed", "purchase", "thank"])
     assert res2["order"]["status"] in ["CONFIRMED", "COMPLETED"]
 
+
+@pytest.mark.asyncio
+async def test_previous_order_inquiry_after_product_view(test_db_session):
+    """
+    Tests that when an active product is in short-term memory (e.g. Gymshark Leggings / SKU-4471),
+    and user asks 'get me informations of my previous order', it routes to order history/details
+    and DOES NOT ask about the product attributes or search catalog.
+    """
+    session_id = f"test_prev_order_sess_{uuid.uuid4().hex[:8]}"
+
+    # Turn 1: Order a sweater
+    await agent_engine.process_user_turn("Add SKU-4471 to cart", session_id=session_id)
+    await agent_engine.process_user_turn("Proceed to checkout", session_id=session_id)
+    ord_res = await agent_engine.process_user_turn("Confirm purchase", session_id=session_id)
+    assert ord_res["order"] is not None
+    ord_num = ord_res["order"]["order_number"]
+
+    # Turn 2: View Gymshark Leggings (sets active_product in memory)
+    prod_res = await agent_engine.process_user_turn("Details for GYMSH-VITAL-SEAM-TGT", session_id=session_id)
+    assert prod_res["short_term_memory"]["active_product"] is not None
+    assert prod_res["short_term_memory"]["active_product"]["sku"] == "GYMSH-VITAL-SEAM-TGT"
+
+    # Turn 3: User asks 'get me informations of my previous order'
+    turn3 = await agent_engine.process_user_turn("get me informations of my previous order", session_id=session_id)
+    
+    # Must have routed to order history or order details, NOT asked about Gymshark leggings attributes
+    assert any(w in turn3["reply"].lower() for w in ["order", "purchase", "placed", ord_num.lower(), "confirmed"])
+    assert len(turn3["products"]) == 0
+
+
