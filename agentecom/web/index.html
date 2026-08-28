@@ -37,9 +37,9 @@
             <div class="flex items-center gap-1.5 bg-slate-800/90 px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
                 <span class="text-slate-400">Provider:</span>
                 <select id="providerSelect" onchange="handleProviderChange()" class="bg-slate-900 text-cyan-300 font-medium border-0 focus:outline-none cursor-pointer rounded px-1.5 py-0.5">
-                    <option value="ollama" selected>🦙 Ollama (Local)</option>
+                    <option value="groq" selected>⚡ Groq API (Llama 3.3)</option>
+                    <option value="ollama">🦙 Ollama (Local)</option>
                     <option value="local">⚡ Local Zero-Key</option>
-                    <option value="groq">⚡ Groq API (Llama 3.3)</option>
                 </select>
             </div>
 
@@ -217,7 +217,7 @@
                 </h4>
                 <div class="space-y-1 text-slate-400">
                     <p>Session: <code id="activeSessionId" class="text-cyan-400 text-[11px]">-</code></p>
-                    <p>Active LLM: <code id="activeModelLabel" class="text-cyan-300 text-[11px]">🦙 Ollama (Local)</code></p>
+                    <p>Active LLM: <code id="activeModelLabel" class="text-cyan-300 text-[11px]">⚡ Groq API (Llama 3.3)</code></p>
                 </div>
             </div>
 

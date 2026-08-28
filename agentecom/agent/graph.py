@@ -138,7 +138,7 @@ def extract_json_tool_calls(content: str) -> List[Dict[str, Any]]:
     return tool_calls
 
 
-def get_llm_model(provider: str = "ollama", model_name: Optional[str] = None, groq_api_key: Optional[str] = None, ollama_base_url: Optional[str] = None):
+def get_llm_model(provider: str = "groq", model_name: Optional[str] = None, groq_api_key: Optional[str] = None, ollama_base_url: Optional[str] = None):
     """
     Factory to return configured LangChain ChatModel or None for local fallback.
     """
@@ -169,7 +169,7 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
     LLM reasoning node that analyzes user request and decides tool calls or final answer,
     with full short-term conversational working memory including all entity attributes.
     """
-    provider = state.get("provider", "ollama")
+    provider = state.get("provider", "groq")
     model_name = state.get("model_name")
     groq_api_key = state.get("groq_api_key")
     ollama_base_url = state.get("ollama_base_url")
@@ -374,13 +374,24 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
         else:
             return {"messages": [AIMessage(content="You have not placed any orders in this session yet.\n\n💡 *Browse our catalog or search for items to place your first order!*")]}
 
-    # 2. General Order History / Previous Orders Inquiry (Flexible semantic matching)
+    # 2. Confirm Order Placement (e.g. "place the order", "confirm purchase", "place order", "finalize checkout", "pay now")
+    elif bool(re.search(r'\b(confirm\s+(?:order|purchase|checkout)|place\s+(?:the\s+|my\s+)?order|finalize\s+checkout|pay\s+now|confirm\s+checkout|order\s+now)\b', low)):
+        sess_id = state.get("checkout_session", {}).get("session_id") if state.get("checkout_session") else "active_session"
+        tool_calls.append({
+            "name": "confirm_checkout_order",
+            "args": {"session_id": sess_id, "customer_email": "agent-shopper@internal.ai"},
+            "id": f"call_{uuid.uuid4().hex[:8]}"
+        })
+
+    # 3. General Order History / Previous Orders Inquiry (Flexible semantic matching)
     elif (
-        bool(re.search(r'\b(?:previous|past|last|my|all|recent)?\s*orders?\b', low))
-        or bool(re.search(r'\b(?:order|purchase)\s*(?:history|details?|info|informations?|status|tracking)\b', low))
-        or bool(re.search(r'\b(?:informations?|details?|info|status|track|tracking|history)\s+(?:of|about|for)\s+(?:all\s+|my\s+|the\s+|all\s+my\s+|previous\s+|past\s+|recent\s+)?orders?\b', low))
-        or bool(re.search(r'\bwhat\s+(?:did\s+i\s+(?:buy|purchase)|have\s+i\s+bought|orders?\s+placed)\b', low))
-        or (order_match and not bool(re.search(r'\b(confirm|checkout|pay)\b', low)))
+        not bool(re.search(r'\b(place|confirm|checkout|pay|finalize)\b', low)) and (
+            bool(re.search(r'\b(?:previous|past|last|my|all|recent)\s+orders?\b', low))
+            or bool(re.search(r'\b(?:order|purchase)\s*(?:history|details?|info|informations?|status|tracking)\b', low))
+            or bool(re.search(r'\b(?:informations?|details?|info|status|track|tracking|history)\s+(?:of|about|for)\s+(?:all\s+|my\s+|the\s+|all\s+my\s+|previous\s+|past\s+|recent\s+)?orders?\b', low))
+            or bool(re.search(r'\bwhat\s+(?:did\s+i\s+(?:buy|purchase)|have\s+i\s+bought|orders?\s+placed)\b', low))
+            or (order_match and not bool(re.search(r'\b(confirm|checkout|pay)\b', low)))
+        )
     ):
         ord_num = order_match.group(1).upper() if order_match else None
         tool_calls.append({
@@ -389,7 +400,7 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             "id": f"call_{uuid.uuid4().hex[:8]}"
         })
 
-    # 3. Product Entity Attributes & Specifications Questions (e.g. warranty, material, dimensions, battery, specs)
+    # 4. Product Entity Attributes & Specifications Questions (e.g. warranty, material, dimensions, battery, specs)
     elif (
         bool(re.search(r'\b(warranty|material|materials|dimensions?|weights?|specs?|specifications?|batter(?:y|ies)|attributes?|features?|colors?|height\s+range|weight\s+capacity)\b', low))
     ) and (sku_match or active_prod or recent_skus or retrieved_prods):
@@ -428,14 +439,6 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             ai_msg = AIMessage(content="Which product would you like attributes for? Please specify a product name or SKU.")
             return {"messages": [ai_msg]}
 
-    # 4. Confirm Order Placement
-    elif bool(re.search(r'\b(confirm\s+(?:order|purchase|checkout)|place\s+(?:the\s+|my\s+)?order|finalize\s+checkout|pay\s+now|confirm\s+checkout|order\s+now)\b', low)):
-        sess_id = state.get("checkout_session", {}).get("session_id") if state.get("checkout_session") else "active_session"
-        tool_calls.append({
-            "name": "confirm_checkout_order",
-            "args": {"session_id": sess_id, "customer_email": "agent-shopper@internal.ai"},
-            "id": f"call_{uuid.uuid4().hex[:8]}"
-        })
     # 5. Checkout Session Initiation
     elif bool(re.search(r'\b(proceed\s+to\s+checkout|create\s+checkout|checkout|buy\s+now|ready\s+to\s+pay)\b', low)):
         cart_items = [{"sku": i["sku"], "quantity": i["quantity"]} for i in state.get("cart", [])]
@@ -1021,7 +1024,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
 
         tool_messages.append(ToolMessage(content=result_str, tool_call_id=call_id))
 
-    provider = state.get("provider", "ollama")
+    provider = state.get("provider", "groq")
     model_name = state.get("model_name")
     groq_api_key = state.get("groq_api_key")
     ollama_base_url = state.get("ollama_base_url")

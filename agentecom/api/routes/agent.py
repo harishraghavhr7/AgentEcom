@@ -9,7 +9,7 @@ router = APIRouter(prefix="/agent", tags=["AI Shopping Agent"])
 class AgentChatRequest(BaseModel):
     message: str = Field(..., description="User prompt or agent command")
     session_id: Optional[str] = Field(None, description="Optional conversation session ID")
-    llm_provider: Optional[str] = Field("ollama", description="'ollama', 'local', or 'groq'")
+    llm_provider: Optional[str] = Field("groq", description="'groq', 'ollama', or 'local'")
     llm_api_key: Optional[str] = Field(None, description="Optional Groq API Key")
     model_name: Optional[str] = Field(None, description="Optional model name (e.g. 'llama-3.3-70b-versatile', 'llama3.2')")
     ollama_base_url: Optional[str] = Field(None, description="Optional custom Ollama base URL")
@@ -32,7 +32,7 @@ async def chat_with_agent(req: AgentChatRequest):
         user_input=req.message,
         session_id=req.session_id,
         llm_api_key=req.llm_api_key,
-        llm_provider=req.llm_provider or "ollama",
+        llm_provider=req.llm_provider or "groq",
         model_name=req.model_name,
         ollama_base_url=req.ollama_base_url
     )

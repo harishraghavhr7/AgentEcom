@@ -59,7 +59,7 @@ class AutonomousCommerceAgent:
         user_input: str,
         session_id: Optional[str] = None,
         llm_api_key: Optional[str] = None,
-        llm_provider: str = "ollama",
+        llm_provider: str = "groq",
         model_name: Optional[str] = None,
         ollama_base_url: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -99,15 +99,29 @@ class AutonomousCommerceAgent:
                 "user_preferences": {}
             }),
             "readability": None,
-            "provider": llm_provider or "ollama",
+            "provider": llm_provider or "groq",
             "model_name": model_name,
             "groq_api_key": llm_api_key,
             "ollama_base_url": ollama_base_url,
             "start_time": start_time
         }
 
+        # Configure LangSmith & LangGraph execution run metadata
+        run_config = {
+            "run_name": f"commerce_turn_{session['session_id'][:8]}",
+            "tags": ["AgentEcom", llm_provider, model_name or "default"],
+            "metadata": {
+                "session_id": session["session_id"],
+                "llm_provider": llm_provider,
+                "model_name": model_name,
+                "cart_items_count": len(session.get("cart", [])),
+                "has_active_order": bool(session.get("order")),
+                "has_active_product": bool((session.get("short_term_memory") or {}).get("active_product"))
+            }
+        }
+
         # Run through LangGraph Workflow
-        result_state = await commerce_langgraph_app.ainvoke(initial_state)
+        result_state = await commerce_langgraph_app.ainvoke(initial_state, config=run_config)
 
         # Extract final reply
         final_msg = result_state["messages"][-1].content if result_state.get("messages") else "No response generated."

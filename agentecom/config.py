@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -24,6 +25,22 @@ class Settings(BaseSettings):
     # Sync & Workers
     ASYNC_INDEXING_WORKER: bool = True
 
-    model_config = SettingsConfigDict(case_sensitive=True, env_file=".env")
+    # LangSmith Observability & Tracing
+    LANGSMITH_TRACING: bool = os.getenv("LANGSMITH_TRACING", "false").lower() in ["true", "1", "yes"]
+    LANGSMITH_API_KEY: Optional[str] = os.getenv("LANGSMITH_API_KEY")
+    LANGSMITH_PROJECT: str = os.getenv("LANGSMITH_PROJECT", "AgentEcom")
+    LANGSMITH_ENDPOINT: str = os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+
+    model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="allow")
 
 settings = Settings()
+
+# Ensure LangSmith environment variables are set for LangChain/LangGraph automatic tracing
+if settings.LANGSMITH_TRACING and settings.LANGSMITH_API_KEY:
+    os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGSMITH_API_KEY"] = settings.LANGSMITH_API_KEY
+    os.environ["LANGCHAIN_API_KEY"] = settings.LANGSMITH_API_KEY
+    os.environ["LANGSMITH_PROJECT"] = settings.LANGSMITH_PROJECT
+    os.environ["LANGCHAIN_PROJECT"] = settings.LANGSMITH_PROJECT
+    os.environ["LANGSMITH_ENDPOINT"] = settings.LANGSMITH_ENDPOINT

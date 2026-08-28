@@ -21,6 +21,17 @@ from agentecom.search.hybrid import hybrid_engine
 from agentecom.core.checkout import checkout_manager, CheckoutError
 from agentecom.db.seed import SAMPLE_PRODUCTS
 
+# Optional LangSmith decorator for deep telemetry
+try:
+    from langsmith import traceable
+except ImportError:
+    def traceable(*args, **kwargs):
+        def decorator(f):
+            return f
+        if len(args) == 1 and callable(args[0]):
+            return args[0]
+        return decorator
+
 # --- Pydantic Schemas for Agent Tool Input/Output ---
 
 class CartItemInput(BaseModel):
@@ -70,6 +81,7 @@ async def ensure_index_ready():
         ]
         hybrid_engine.build_index(prod_dicts)
 
+@traceable(name="tool_search_products", run_type="retriever")
 async def tool_search_products(
     query: str,
     category: Optional[str] = None,
@@ -123,6 +135,7 @@ async def tool_search_products(
     }
 
 
+@traceable(name="tool_get_product", run_type="tool")
 async def tool_get_product(sku: str) -> Dict[str, Any]:
     """
     Get full product details and live inventory by SKU with sub-2ms caching.
@@ -202,6 +215,7 @@ async def tool_get_product(sku: str) -> Dict[str, Any]:
         }
 
 
+@traceable(name="tool_check_inventory", run_type="tool")
 async def tool_check_inventory(skus: List[str]) -> Dict[str, Any]:
     """
     Check stock availability for multiple SKUs in a single batch request.
@@ -228,6 +242,7 @@ async def tool_check_inventory(skus: List[str]) -> Dict[str, Any]:
         return {"inventory": inventory_status}
 
 
+@traceable(name="tool_create_checkout_session", run_type="tool")
 async def tool_create_checkout_session(
     items: List[Dict[str, Any]],
     idempotency_key: str,
@@ -257,6 +272,7 @@ async def tool_create_checkout_session(
             return {"error": e.message, "status_code": e.status_code}
 
 
+@traceable(name="tool_confirm_checkout", run_type="tool")
 async def tool_confirm_checkout(
     session_id: str,
     idempotency_key: str,
@@ -288,6 +304,7 @@ async def tool_confirm_checkout(
             return {"error": e.message, "status_code": e.status_code}
 
 
+@traceable(name="tool_get_orders", run_type="tool")
 async def tool_get_orders(
     order_number: Optional[str] = None,
     customer_email: Optional[str] = None,
