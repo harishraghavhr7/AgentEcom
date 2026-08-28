@@ -20,6 +20,7 @@ class ReadabilityMetric(BaseModel):
     fallback_active: bool = False
     llm_provider: str = "groq"
     fallback_reason: Optional[str] = None
+    security_flag: Optional[str] = None
 
 class ShortTermMemory(BaseModel):
     active_product: Optional[Dict[str, Any]] = None  # Last focused/retrieved product with full attributes & specs
@@ -34,24 +35,39 @@ class ShortTermMemory(BaseModel):
 class AgentResponse(BaseModel):
     reply: str
     session_id: str
+    user_id: Optional[str] = None
+    user_persona: Dict[str, Any] = Field(default_factory=dict)
     tool_calls_made: List[Dict[str, Any]] = Field(default_factory=list)
     products: List[Dict[str, Any]] = Field(default_factory=list)
     cart: List[Dict[str, Any]] = Field(default_factory=list)
     checkout_session: Optional[Dict[str, Any]] = None
     order: Optional[Dict[str, Any]] = None
+    active_return_request: Optional[Dict[str, Any]] = None
+    tracking_info: Optional[Dict[str, Any]] = None
     short_term_memory: Optional[Dict[str, Any]] = None
     fallback_active: bool = False
+    security_flag: Optional[str] = None
+    requires_human_approval: bool = False
+    voice_mode: bool = False
     readability: ReadabilityMetric = Field(default_factory=ReadabilityMetric)
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]
     session_id: str
+    user_id: Optional[str]
+    user_persona: Dict[str, Any]
     cart: List[Dict[str, Any]]
     checkout_session: Optional[Dict[str, Any]]
     order: Optional[Dict[str, Any]]
+    active_return_request: Optional[Dict[str, Any]]
+    tracking_info: Optional[Dict[str, Any]]
     tool_calls_made: List[Dict[str, Any]]
     retrieved_products: List[Dict[str, Any]]
     short_term_memory: Optional[Dict[str, Any]]
+    security_flag: Optional[str]
+    security_reason: Optional[str]
+    requires_human_approval: bool
+    voice_mode: bool
     readability: Optional[Dict[str, Any]]
     provider: str  # "ollama", "groq", "local"
     model_name: Optional[str]

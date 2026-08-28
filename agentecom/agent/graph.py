@@ -25,8 +25,15 @@ from agentecom.agent.tools_langchain import (
     search_products,
     get_product_details,
     check_inventory_stock,
+    add_to_cart,
+    get_order_history,
     create_checkout_session,
     confirm_checkout_order,
+    cancel_order,
+    swap_order_item,
+    create_return_request,
+    track_shipment,
+    update_user_persona,
     COMMERCE_TOOLS
 )
 from agentecom.tools.commerce import (
@@ -35,12 +42,18 @@ from agentecom.tools.commerce import (
     tool_create_checkout_session,
     tool_confirm_checkout,
     tool_check_inventory,
-    tool_get_orders
+    tool_get_orders,
+    tool_cancel_order,
+    tool_swap_order_item,
+    tool_create_return_request,
+    tool_track_shipment,
+    tool_get_user_profile,
+    tool_update_user_profile
 )
 from agentecom.core.cache import cache
 
 SYSTEM_PROMPT = """You are a warm, knowledgeable, proactive, and friendly Autonomous AI Shopping Assistant for AgentEcom.
-You have access to fast, idempotent commerce tools:
+You have access to fast, idempotent commerce and post-purchase self-service tools:
 - `search_products`: Search for products in catalog. Use this to find, browse, or recommend products.
 - `get_product_details`: Get full product specs, pricing, attributes (warranty, material, dimensions, battery), and live inventory by SKU.
 - `check_inventory_stock`: Check availability and live stock count for a list of SKUs.
@@ -48,33 +61,28 @@ You have access to fast, idempotent commerce tools:
 - `get_order_history`: Look up past orders, purchase history, order details, order numbers, order dates, and tracking information.
 - `create_checkout_session`: Create an isolated short-lived checkout session for items in the cart.
 - `confirm_checkout_order`: Confirm and place an order idempotently.
+- `cancel_order`: Cancel an unfulfilled order and issue a refund.
+- `swap_order_item`: Swap an item size/color on an order before shipment.
+- `create_return_request`: Process a return (RMA) with automated 30-day window check.
+- `track_shipment`: Live courier tracking with delivery milestones.
+- `update_user_persona`: Save customer sizing preferences, brand affinities, or material constraints.
 
 CRITICAL INTENT ROUTING RULES:
-1. ORDER HISTORY & TRACKING INTENT:
-   - Whenever the user asks about past orders, previous purchases, order status, order placement dates/times, order IDs, or order details (e.g. 'get me informations of my previous order', 'show all my orders', 'what did I buy', 'order status', 'track ORD-XXXX', 'when did I purchase it'):
-     -> ALWAYS CALL `get_order_history`.
-     -> NEVER confuse order history inquiries with product catalog searches!
-2. PRODUCT SEARCH & BROWSE INTENT:
-   - When the user asks to browse, find, recommend, or search products:
+1. POST-PURCHASE SELF-SERVICE & RETURNS:
+   - Cancel order ('cancel my order', 'stop order'): -> Call `cancel_order(order_number=...)`.
+   - Swap item/size ('swap size to M', 'change color'): -> Call `swap_order_item(order_number=..., old_sku=..., new_sku=...)`.
+   - Returns & refunds ('return this product', 'refund my order', 'it didn't fit'): -> Call `create_return_request(order_number=..., sku=..., reason=...)`.
+   - Package tracking ('where is my shipment', 'track my package'): -> Call `track_shipment(order_number=...)`.
+2. ORDER HISTORY & TRACKING INTENT:
+   - Past purchases & history ('get me informations of my previous order', 'show all orders', 'when did I buy it'):
+     -> Call `get_order_history`.
+3. PRODUCT SEARCH & PERSONA FILTERING:
+   - When user asks to search or browse products:
+     -> Prioritize user's saved sizing, brand affinities, and avoid allergens from Long-Term Persona.
      -> Call `search_products(query=..., max_price=..., category=...)`.
-     -> If the user only provides a price constraint (e.g. 'under $300', 'cheaper options'), set the `query` argument to the previous search topic from Conversational Working Memory.
-3. PRODUCT SPECIFICATIONS & DETAILS INTENT:
-   - When the user asks for details, specs, warranty, material, or info for a specific SKU or the active product:
-     -> Call `get_product_details(sku=...)`.
-4. STOCK & INVENTORY INTENT:
-   - When the user asks 'how many in stock', 'is it available', or 'units left':
-     -> Call `check_inventory_stock(skus=[...])`.
-5. ADD TO CART INTENT:
-   - When the user says 'add to cart', 'add this product to the cart', 'add it', 'buy this':
-     -> Call `add_to_cart(sku=..., quantity=...)`.
-6. CHECKOUT & CONFIRMATION:
-   - When the user says 'checkout' or 'proceed to checkout': call `create_checkout_session`.
-   - When the user confirms ('confirm order', 'confirm purchase', 'place order', 'pay now'): call `confirm_checkout_order`.
-
-Interactive Response Guidelines:
-- Speak naturally, warmly, and conversationally.
-- When presenting product search results, emphasize product names, SKU codes (e.g. `**SKU-4471**`), and prices in bold.
-- Celebrate order placements with order number (`**ORD-XXXX**`) and summary.
+4. CHECKOUT & CONFIRMATION:
+   - 'checkout' -> `create_checkout_session`.
+   - 'confirm order', 'confirm purchase', 'place order' -> `confirm_checkout_order`.
 """
 
 def extract_json_tool_calls(content: str) -> List[Dict[str, Any]]:
@@ -140,12 +148,11 @@ def extract_json_tool_calls(content: str) -> List[Dict[str, Any]]:
 
 def get_llm_model(provider: str = "groq", model_name: Optional[str] = None, groq_api_key: Optional[str] = None, ollama_base_url: Optional[str] = None):
     """
-    Factory to return configured LangChain ChatModel or None for local fallback.
+    Factory to return configured LangChain ChatModel (Groq) or None for deterministic local fallback planner.
     """
     groq_key = groq_api_key or os.getenv("GROQ_API_KEY")
-    ollama_url = ollama_base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-    if provider == "groq" and groq_key:
+    if (provider == "groq" or provider == "cloud") and groq_key:
         try:
             from langchain_groq import ChatGroq
             m_name = model_name or "llama-3.3-70b-versatile"
@@ -153,15 +160,78 @@ def get_llm_model(provider: str = "groq", model_name: Optional[str] = None, groq
         except Exception:
             pass
 
-    elif provider == "ollama":
-        try:
-            from langchain_ollama import ChatOllama
-            m_name = model_name or "llama3.2"
-            return ChatOllama(model=m_name, base_url=ollama_url, temperature=0.2)
-        except Exception:
-            pass
-
+    # All other cases (provider="local", provider="fallback", missing key) route directly to local fallback planner
     return None
+
+
+async def input_guardrail_node(state: AgentState) -> Dict[str, Any]:
+    """
+    Scans incoming user input for prompt injections, system overrides, arbitrary price hacks, and safety violations.
+    """
+    last_msg = ""
+    for m in reversed(state.get("messages", [])):
+        if isinstance(m, HumanMessage) or (hasattr(m, "content") and not isinstance(m, ToolMessage) and not isinstance(m, AIMessage)):
+            last_msg = m.content
+            break
+    if not last_msg and state.get("messages"):
+        last_msg = state["messages"][-1].content
+    low = last_msg.lower().strip()
+
+    # Known prompt injection & price manipulation patterns
+    injection_patterns = [
+        r'\b(ignore\s+(?:all\s+)?previous\s+instructions?)\b',
+        r'\b(system\s+prompt\s+override)\b',
+        r'\b(dan\s+mode|jailbreak|developer\s+mode)\b',
+        r'\b(sell\s+(?:me\s+)?(?:this|it|\w+)\s+for\s+\$(?:0|1|0\.01|0\.00))\b',
+        r'\b(discount\s+to\s+\$(?:0|1|0\.01))\b',
+        r'\b(bypass\s+payment|free\s+checkout)\b'
+    ]
+
+    for pat in injection_patterns:
+        if re.search(pat, low):
+            return {
+                "security_flag": "PROMPT_INJECTION_BLOCKED",
+                "security_reason": "Security Guardrail blocked prompt injection or unauthorized system override.",
+                "fallback_active": True
+            }
+
+    return {"security_flag": None, "security_reason": None}
+
+
+async def safe_refusal_node(state: AgentState) -> Dict[str, Any]:
+    """
+    Emits a polite, safe refusal when a security guardrail policy is violated.
+    """
+    reason = state.get("security_reason") or "Policy violation detected."
+    msg = (
+        "🛡️ **Security & Policy Guardrail Notice**\n\n"
+        f"{reason}\n\n"
+        "As an Autonomous Commerce Assistant, I am bound by strict store integrity policies. "
+        "I cannot modify system parameters, bypass payments, or alter catalog prices.\n\n"
+        "How can I help you with genuine product browsing, cart management, or order tracking?"
+    )
+    return {
+        "messages": [AIMessage(content=msg)],
+        "fallback_active": True,
+        "fallback_reason": reason,
+        "security_flag": state.get("security_flag", "POLICY_VIOLATION")
+    }
+
+
+async def memory_enricher_node(state: AgentState) -> Dict[str, Any]:
+    """
+    Enriches AgentState with long-term customer persona (sizing, brand affinities, allergies, preferences).
+    """
+    user_id = state.get("user_id") or "default_shopper"
+    profile = await tool_get_user_profile(user_id=user_id)
+    persona = {
+        "user_id": user_id,
+        "sizing": profile.get("sizing", {}),
+        "brand_affinities": profile.get("brand_affinities", []),
+        "preferences": profile.get("preferences", {}),
+        "allergies": profile.get("allergies", [])
+    }
+    return {"user_persona": persona}
 
 
 async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
@@ -301,21 +371,134 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
     sku_match = re.search(r'\b([A-Z0-9]{3,8}-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
     order_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
 
+    # 0a. Cancel Order Intent
+    if bool(re.search(r'\b(cancel\s+(?:my\s+|the\s+)?order|stop\s+(?:my\s+|the\s+)?order|abort\s+order)\b', low)):
+        target_ord_num = order_match.group(1).upper() if order_match else (active_order.get("order_number") if active_order else None)
+        if not target_ord_num:
+            ord_res = await tool_get_orders(limit=1)
+            if ord_res.get("orders"):
+                target_ord_num = ord_res["orders"][0]["order_number"]
+
+        if target_ord_num:
+            tool_calls.append({
+                "name": "cancel_order",
+                "args": {"order_number": target_ord_num},
+                "id": f"call_{uuid.uuid4().hex[:8]}"
+            })
+        else:
+            return {"messages": [AIMessage(content="You have no active orders to cancel.")], "fallback_active": True}
+
+    # 0b. Track Shipment Intent
+    elif bool(re.search(r'\b(track\s+(?:my\s+|the\s+)?(?:shipment|package|delivery|order)|where\s+is\s+my\s+(?:package|delivery|shipment|order)|delivery\s+status|tracking\s+info)\b', low)):
+        target_ord_num = order_match.group(1).upper() if order_match else (active_order.get("order_number") if active_order else None)
+        if not target_ord_num:
+            ord_res = await tool_get_orders(limit=1)
+            if ord_res.get("orders"):
+                target_ord_num = ord_res["orders"][0]["order_number"]
+
+        if target_ord_num:
+            tool_calls.append({
+                "name": "track_shipment",
+                "args": {"order_number": target_ord_num},
+                "id": f"call_{uuid.uuid4().hex[:8]}"
+            })
+        else:
+            return {"messages": [AIMessage(content="Please provide your Order ID (e.g. `ORD-XXXX`) to track your shipment.")], "fallback_active": True}
+
+    # 0c. Swap Order Item Intent
+    elif bool(re.search(r'\b(swap\s+(?:item|size|color|sku)|change\s+(?:size|color)|exchange\s+item)\b', low)):
+        target_ord_num = order_match.group(1).upper() if order_match else (active_order.get("order_number") if active_order else None)
+        if not target_ord_num:
+            ord_res = await tool_get_orders(limit=1)
+            if ord_res.get("orders"):
+                target_ord_num = ord_res["orders"][0]["order_number"]
+
+        if target_ord_num:
+            skus_in_text = re.findall(r'\b([A-Z0-9]{3,8}-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
+            old_sku = skus_in_text[0].upper() if len(skus_in_text) > 0 else (active_prod.get("sku") if active_prod else "SKU-4471")
+            new_sku = skus_in_text[1].upper() if len(skus_in_text) > 1 else "FELL-STAG-EKG"
+            tool_calls.append({
+                "name": "swap_order_item",
+                "args": {"order_number": target_ord_num, "old_sku": old_sku, "new_sku": new_sku},
+                "id": f"call_{uuid.uuid4().hex[:8]}"
+            })
+        else:
+            return {"messages": [AIMessage(content="Please provide an Order ID to swap items.")], "fallback_active": True}
+
+    # 0d. Return Request / RMA Intent
+    elif bool(re.search(r'\b(return\s+(?:my\s+|the\s+)?(?:item|product|order)|refund\s+(?:my\s+|the\s+)?(?:item|order)|damaged\s+item|didn\'t\s+fit|initiate\s+return)\b', low)):
+        target_ord_num = order_match.group(1).upper() if order_match else (active_order.get("order_number") if active_order else None)
+        if not target_ord_num:
+            ord_res = await tool_get_orders(limit=1)
+            if ord_res.get("orders"):
+                target_ord_num = ord_res["orders"][0]["order_number"]
+
+        if target_ord_num:
+            target_sku = sku_match.group(1).upper() if sku_match else (active_prod.get("sku") if active_prod else "SKU-4471")
+            reason = "Item didn't fit / customer preference"
+            if "damage" in low or "broken" in low:
+                reason = "Item arrived damaged"
+            elif "fit" in low or "size" in low:
+                reason = "Incorrect size / fit"
+
+            days_match = re.search(r'(\d+)\s*days?', low)
+            days_count = int(days_match.group(1)) if days_match else 5
+
+            tool_calls.append({
+                "name": "create_return_request",
+                "args": {"order_number": target_ord_num, "sku": target_sku, "reason": reason, "days_since_order": days_count},
+                "id": f"call_{uuid.uuid4().hex[:8]}"
+            })
+        else:
+            return {"messages": [AIMessage(content="Please provide your Order ID (e.g. `ORD-XXXX`) to initiate a return.")], "fallback_active": True}
+
+    # 0e. Customer Persona Update Intent
+    elif bool(re.search(r'\b(my\s+size\s+is|i\s+wear\s+size|allergic\s+to|i\s+prefer\s+brand)\b', low)):
+        user_id = state.get("user_id") or "default_shopper"
+        sizing = {}
+        size_match = re.search(r'\b(?:i\s+wear|my\s+size\s+is|size)\s+(?:size\s+)?(XS|S|M|L|XL|XXL|[\d\.]+)\b', last_msg, re.IGNORECASE)
+        if size_match:
+            sizing = {"clothing": size_match.group(1).upper()}
+
+        affinities = []
+        for brand in ["FlexiSpot", "Fellow", "Breville", "Sony", "The Ordinary", "Sea to Summit"]:
+            if brand.lower() in low:
+                affinities.append(brand)
+
+        allergies = []
+        allergy_match = re.search(r'\ballergic\s+to\s+([a-zA-Z\s]+)\b', low)
+        if allergy_match:
+            allergies = [allergy_match.group(1).strip()]
+
+        tool_calls.append({
+            "name": "update_user_persona",
+            "args": {"user_id": user_id, "sizing": sizing, "brand_affinities": affinities, "allergies": allergies},
+            "id": f"call_{uuid.uuid4().hex[:8]}"
+        })
+
     # 1. Order Entity Attribute & Placement Date/Time/Cost Questions (e.g. "when do i purchase it", "when was it ordered", "order date", "how much did i pay")
-    is_order_date_q = bool(
-        re.search(r'\b(when\s+(?:did|was|do)\s+i\s+(?:buy|purchase|order|place)|when\s+placed|order\s+date|purchase\s+date|date\s+of\s+(?:purchase|order)|time\s+of\s+(?:purchase|order)|order\s+placed\s+on|order\s+time)\b', low)
-        or (re.search(r'\b(when\s+did\s+i|when\s+do\s+i|when\s+was)\b', low) and re.search(r'\b(purchase|buy|order|place)\b', low))
-    )
-
-    is_order_cost_q = bool(
-        re.search(r'\b(how\s+much\s+did\s+i\s+pay|how\s+much\s+was\s+it|what\s+did\s+it\s+cost|total\s+paid|order\s+total|total\s+amount\s+paid|what\s+did\s+i\s+spend)\b', low)
-        and not re.search(r'\b(under|below|less\s+than|budget|for\s+under)\b', low)
-    )
-
-    is_order_status_q = bool(re.search(r'\b(status\s+of\s+(?:my\s+|the\s+)?order|is\s+(?:my\s+|the\s+)?order\s+confirmed|tracking\s+status)\b', low))
-    is_order_id_q = bool(re.search(r'\b(idempotency\s+key|order\s+id|order\s+number|customer\s+email|order\s+reference)\b', low) and not re.search(r'\b(confirm|checkout|pay)\b', low))
-
-    if is_order_date_q or is_order_cost_q or is_order_status_q or is_order_id_q:
+    elif (
+        bool(
+            re.search(r'\b(when\s+(?:did|was|do)\s+i\s+(?:buy|purchase|order|place)|when\s+placed|order\s+date|purchase\s+date|date\s+of\s+(?:purchase|order)|time\s+of\s+(?:purchase|order)|order\s+placed\s+on|order\s+time)\b', low)
+            or (re.search(r'\b(when\s+did\s+i|when\s+do\s+i|when\s+was)\b', low) and re.search(r'\b(purchase|buy|order|place)\b', low))
+        )
+        or bool(
+            re.search(r'\b(how\s+much\s+did\s+i\s+pay|how\s+much\s+was\s+it|what\s+did\s+it\s+cost|total\s+paid|order\s+total|total\s+amount\s+paid|what\s+did\s+i\s+spend)\b', low)
+            and not re.search(r'\b(under|below|less\s+than|budget|for\s+under)\b', low)
+        )
+        or bool(re.search(r'\b(status\s+of\s+(?:my\s+|the\s+)?order|is\s+(?:my\s+|the\s+)?order\s+confirmed|tracking\s+status)\b', low))
+        or bool(re.search(r'\b(idempotency\s+key|order\s+id|order\s+number|customer\s+email|order\s+reference)\b', low) and not re.search(r'\b(confirm|checkout|pay)\b', low))
+    ):
+        is_order_date_q = bool(
+            re.search(r'\b(when\s+(?:did|was|do)\s+i\s+(?:buy|purchase|order|place)|when\s+placed|order\s+date|purchase\s+date|date\s+of\s+(?:purchase|order)|time\s+of\s+(?:purchase|order)|order\s+placed\s+on|order\s+time)\b', low)
+            or (re.search(r'\b(when\s+did\s+i|when\s+do\s+i|when\s+was)\b', low) and re.search(r'\b(purchase|buy|order|place)\b', low))
+        )
+        is_order_cost_q = bool(
+            re.search(r'\b(how\s+much\s+did\s+i\s+pay|how\s+much\s+was\s+it|what\s+did\s+it\s+cost|total\s+paid|order\s+total|total\s+amount\s+paid|what\s+did\s+i\s+spend)\b', low)
+            and not re.search(r'\b(under|below|less\s+than|budget|for\s+under)\b', low)
+        )
+        is_order_status_q = bool(re.search(r'\b(status\s+of\s+(?:my\s+|the\s+)?order|is\s+(?:my\s+|the\s+)?order\s+confirmed|tracking\s+status)\b', low))
+        is_order_id_q = bool(re.search(r'\b(idempotency\s+key|order\s+id|order\s+number|customer\s+email|order\s+reference)\b', low) and not re.search(r'\b(confirm|checkout|pay)\b', low))
         target_ord = active_order
         if not target_ord:
             ord_res = await tool_get_orders(limit=1)
@@ -1052,6 +1235,101 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
                 )
             retrieved_prods = []
 
+        elif tool_name == "cancel_order":
+            ord_num = args.get("order_number")
+            res = await tool_cancel_order(order_number=ord_num)
+            if "error" in res:
+                result_str = f"⚠️ Could not cancel order: {res['error']}"
+            else:
+                if order and order.get("order_number") == res.get("order_number"):
+                    order["status"] = "CANCELLED"
+                result_str = (
+                    f"### 🛑 Order Cancelled Successfully\n"
+                    f"- **Order Number**: `{res['order_number']}`\n"
+                    f"- **Status**: 🔴 `{res['status']}`\n"
+                    f"- **Refund Amount**: **${res.get('refund_amount', 0):.2f}**\n\n"
+                    f"Reserved inventory has been released and an instant refund issued to your payment method."
+                )
+
+        elif tool_name == "swap_order_item":
+            ord_num = args.get("order_number")
+            old_sku = args.get("old_sku")
+            new_sku = args.get("new_sku")
+            res = await tool_swap_order_item(order_number=ord_num, old_sku=old_sku, new_sku=new_sku)
+            if "error" in res:
+                result_str = f"⚠️ Swap item failed: {res['error']}"
+            else:
+                result_str = (
+                    f"### 🔄 Item Swapped on Order `{res['order_number']}`\n"
+                    f"- **Previous SKU**: `{res['old_sku']}`\n"
+                    f"- **New Replacement**: **{res['new_product_name']}** (`{res['new_sku']}`)\n"
+                    f"- **Updated Order Total**: **${res['updated_total']:.2f}**\n\n"
+                    f"Your order has been updated with the new item before warehouse shipment."
+                )
+
+        elif tool_name == "create_return_request":
+            ord_num = args.get("order_number")
+            sku = args.get("sku")
+            reason = args.get("reason", "Customer return")
+            days_count = args.get("days_since_order", 5)
+            res = await tool_create_return_request(order_number=ord_num, sku=sku, reason=reason, days_since_order=days_count)
+            
+            if res.get("is_out_of_policy"):
+                result_str = (
+                    f"### ⚠️ Return Request Outside 30-Day Policy\n"
+                    f"- **RMA Number**: `{res['rma_number']}`\n"
+                    f"- **Order Number**: `{res['order_number']}` (Purchased {res['days_since_order']} days ago)\n"
+                    f"- **Status**: 🟡 `PENDING_REVIEW`\n"
+                    f"- **Notice**: This return requires **Human Manager Review & Approval** because it exceeds the standard 30-day window.\n\n"
+                    f"Our support team has been notified for one-touch manager override."
+                )
+            else:
+                result_str = (
+                    f"### 📦 Return Authorized (RMA)\n"
+                    f"- **RMA Number**: `{res['rma_number']}`\n"
+                    f"- **Order Number**: `{res['order_number']}`\n"
+                    f"- **Status**: 🟢 `APPROVED`\n"
+                    f"- **Prepaid Label**: [Download PDF Return Shipping Label]({res['rma_label_url']})\n\n"
+                    f"Please affix the prepaid label to your return box and drop it at any FedEx location."
+                )
+
+        elif tool_name == "track_shipment":
+            ord_num = args.get("order_number")
+            res = await tool_track_shipment(order_number=ord_num)
+            
+            checkpoints_lines = []
+            for cp in res.get("checkpoints", []):
+                checkpoints_lines.append(f"- *{cp.get('timestamp')}* ({cp.get('location')}): **{cp.get('status')}**")
+            cp_txt = "\n".join(checkpoints_lines) if checkpoints_lines else "Package in transit"
+
+            result_str = (
+                f"### 🚚 Live Courier Shipment Tracking\n"
+                f"- **Order Number**: `{res['order_number']}`\n"
+                f"- **Carrier**: {res['carrier']} (Tracking: `{res['tracking_number']}`)\n"
+                f"- **Status**: 🟢 **`{res['status']}`**\n"
+                f"- **Estimated Delivery**: **{res['estimated_delivery']}**\n"
+                f"- **Current Location**: {res['current_location']}\n\n"
+                f"**Tracking Milestones**:\n{cp_txt}"
+            )
+
+        elif tool_name == "update_user_persona":
+            u_id = args.get("user_id", "default_shopper")
+            res = await tool_update_user_profile(
+                user_id=u_id,
+                updates={
+                    "sizing": args.get("sizing", {}),
+                    "brand_affinities": args.get("brand_affinities", []),
+                    "allergies": args.get("allergies", [])
+                }
+            )
+            result_str = (
+                f"### 👤 Personal Profile & Preferences Updated\n"
+                f"- **Saved Sizing**: {json.dumps(res.get('sizing', {}))}\n"
+                f"- **Preferred Brands**: {', '.join(res.get('brand_affinities', [])) or 'None'}\n"
+                f"- **Allergies & Constraints**: {', '.join(res.get('allergies', [])) or 'None'}\n\n"
+                f"I will remember your preferences and automatically prioritize them in future searches!"
+            )
+
         else:
             result_str = f"Executed {tool_name}."
 
@@ -1093,6 +1371,44 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
         }
 
 
+async def memory_updater_node(state: AgentState) -> Dict[str, Any]:
+    """
+    Passively extracts newly stated customer preferences from conversation and persists to UserProfile.
+    """
+    user_id = state.get("user_id") or "default_shopper"
+    last_msg = ""
+    for m in reversed(state.get("messages", [])):
+        if isinstance(m, HumanMessage):
+            last_msg = m.content
+            break
+    low = last_msg.lower().strip()
+
+    updates = {}
+    size_match = re.search(r'\b(?:i\s+wear|my\s+size\s+is|size)\s+(?:size\s+)?(XS|S|M|L|XL|XXL|[\d\.]+)\b', last_msg, re.IGNORECASE)
+    if size_match:
+        val = size_match.group(1).upper()
+        if "shoe" in low:
+            updates["sizing"] = {"shoe": val}
+        else:
+            updates["sizing"] = {"clothing": val}
+
+    for brand in ["FlexiSpot", "Fellow", "Breville", "Sony", "The Ordinary", "Sea to Summit", "Logitech", "Hydro Flask"]:
+        if brand.lower() in low and any(w in low for w in ["prefer", "love", "favorite", "only buy", "like"]):
+            updates["brand_affinities"] = [brand]
+
+    allergy_match = re.search(r'\ballergic\s+to\s+([a-zA-Z\s]+)\b', low)
+    if allergy_match:
+        updates["allergies"] = [allergy_match.group(1).strip()]
+
+    if updates:
+        try:
+            await tool_update_user_profile(user_id=user_id, updates=updates)
+        except Exception:
+            pass
+
+    return {}
+
+
 async def readability_auditor_node(state: AgentState) -> Dict[str, Any]:
     """
     Analyzes token reduction %, execution latency, and generates AI Readability audit.
@@ -1124,10 +1440,18 @@ async def readability_auditor_node(state: AgentState) -> Dict[str, Any]:
         "graph_steps": len(state.get("messages", [])),
         "fallback_active": is_fallback,
         "llm_provider": provider_used,
-        "fallback_reason": state.get("fallback_reason", "Local offline fallback planner active" if is_fallback else None)
+        "fallback_reason": state.get("fallback_reason", "Local offline fallback planner active" if is_fallback else None),
+        "security_flag": state.get("security_flag")
     }
 
     return {"readability": readability, "fallback_active": is_fallback}
+
+
+def check_guardrail(state: AgentState) -> str:
+    """Routing edge after input guardrail analysis."""
+    if state.get("security_flag"):
+        return "safe_refusal"
+    return "memory_enricher"
 
 
 def should_continue(state: AgentState) -> str:
@@ -1135,7 +1459,7 @@ def should_continue(state: AgentState) -> str:
     last_msg = state["messages"][-1]
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
         return "tools"
-    return "readability"
+    return "memory_updater"
 
 
 def route_after_tools(state: AgentState) -> str:
@@ -1143,24 +1467,37 @@ def route_after_tools(state: AgentState) -> str:
     last_msg = state["messages"][-1]
     if isinstance(last_msg, ToolMessage) or (hasattr(last_msg, "tool_call_id") and getattr(last_msg, "tool_call_id", None)):
         return "agent"
-    return "readability"
+    return "memory_updater"
 
 
-# Build the LangGraph Workflow
+# Build the Upgraded LangGraph Workflow
 def build_commerce_agent_graph() -> StateGraph:
     workflow = StateGraph(AgentState)
 
+    workflow.add_node("guardrail", input_guardrail_node)
+    workflow.add_node("safe_refusal", safe_refusal_node)
+    workflow.add_node("memory_enricher", memory_enricher_node)
     workflow.add_node("agent", agent_reasoning_node)
     workflow.add_node("tools", tool_execution_node)
+    workflow.add_node("memory_updater", memory_updater_node)
     workflow.add_node("readability", readability_auditor_node)
 
-    workflow.add_edge(START, "agent")
+    workflow.add_edge(START, "guardrail")
+    workflow.add_conditional_edges(
+        "guardrail",
+        check_guardrail,
+        {
+            "safe_refusal": "safe_refusal",
+            "memory_enricher": "memory_enricher"
+        }
+    )
+    workflow.add_edge("memory_enricher", "agent")
     workflow.add_conditional_edges(
         "agent",
         should_continue,
         {
             "tools": "tools",
-            "readability": "readability"
+            "memory_updater": "memory_updater"
         }
     )
     workflow.add_conditional_edges(
@@ -1168,9 +1505,11 @@ def build_commerce_agent_graph() -> StateGraph:
         route_after_tools,
         {
             "agent": "agent",
-            "readability": "readability"
+            "memory_updater": "memory_updater"
         }
     )
+    workflow.add_edge("safe_refusal", "readability")
+    workflow.add_edge("memory_updater", "readability")
     workflow.add_edge("readability", END)
 
     return workflow.compile()

@@ -9,10 +9,12 @@ router = APIRouter(prefix="/agent", tags=["AI Shopping Agent"])
 class AgentChatRequest(BaseModel):
     message: str = Field(..., description="User prompt or agent command")
     session_id: Optional[str] = Field(None, description="Optional conversation session ID")
+    user_id: Optional[str] = Field("default_shopper", description="User ID for long-term persona lookup")
     llm_provider: Optional[str] = Field("groq", description="'groq', 'ollama', or 'local'")
     llm_api_key: Optional[str] = Field(None, description="Optional Groq API Key")
     model_name: Optional[str] = Field(None, description="Optional model name (e.g. 'llama-3.3-70b-versatile', 'llama3.2')")
     ollama_base_url: Optional[str] = Field(None, description="Optional custom Ollama base URL")
+    voice_mode: Optional[bool] = Field(False, description="Enable voice-optimized synthesis")
 
 class ResetSessionResponse(BaseModel):
     session_id: str
@@ -22,8 +24,8 @@ class ResetSessionResponse(BaseModel):
 async def chat_with_agent(req: AgentChatRequest):
     """
     Multi-turn Conversational AI Shopping Agent endpoint powered by LangGraph.
-    Performs autonomous tool selection, execution, and returns structured
-    recommendations along with an AI Readability & Token Economy report.
+    Performs autonomous tool selection, guardrail checks, post-purchase operations,
+    and returns structured recommendations along with an AI Readability & Token Economy report.
     """
     if not req.message.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
@@ -34,7 +36,9 @@ async def chat_with_agent(req: AgentChatRequest):
         llm_api_key=req.llm_api_key,
         llm_provider=req.llm_provider or "groq",
         model_name=req.model_name,
-        ollama_base_url=req.ollama_base_url
+        ollama_base_url=req.ollama_base_url,
+        user_id=req.user_id,
+        voice_mode=bool(req.voice_mode)
     )
     return AgentResponse(**res_dict)
 

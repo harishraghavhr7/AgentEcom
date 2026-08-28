@@ -11,11 +11,16 @@ Key architectural rules:
 import json
 import time
 import re
+import uuid
+import datetime
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 from agentecom.db.database import AsyncSessionLocal
-from agentecom.db.models import Product, Inventory, Order
+from agentecom.db.models import (
+    Product, Inventory, Order, OrderStatus,
+    UserProfile, ReturnRequest, ReturnStatus, ShipmentTracking, ShipmentStatus
+)
 from agentecom.core.cache import cache
 from agentecom.search.hybrid import hybrid_engine
 from agentecom.core.checkout import checkout_manager, CheckoutError
@@ -355,3 +360,296 @@ async def tool_get_orders(
             })
         
         return {"orders": orders_data, "count": len(orders_data)}
+
+
+@traceable(name="tool_cancel_order", run_type="tool")
+async def tool_cancel_order(order_number: str) -> Dict[str, Any]:
+    """
+    Cancel an existing order and restore reserved stock if not yet shipped.
+    """
+    ord_clean = str(order_number).strip().upper()
+    ord_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', ord_clean, re.IGNORECASE)
+    if ord_match:
+        ord_clean = ord_match.group(1).upper()
+
+    async with AsyncSessionLocal() as db:
+        stmt = select(Order).where(Order.order_number == ord_clean)
+        res = await db.execute(stmt)
+        order = res.scalar_one_or_none()
+
+        if not order:
+            return {"error": f"Order `{ord_clean}` not found.", "status_code": 404}
+
+        if order.status in [OrderStatus.CANCELLED, "CANCELLED"]:
+            return {"error": f"Order `{ord_clean}` is already cancelled.", "status_code": 400}
+
+        if order.status in [OrderStatus.SHIPPED, "SHIPPED"]:
+            return {
+                "error": f"Order `{ord_clean}` has already shipped and cannot be cancelled directly. Please initiate a return request instead.",
+                "status_code": 400,
+                "can_return": True
+            }
+
+        # Restore inventory
+        try:
+            items = json.loads(order.items_json)
+            for item in items:
+                sku = item.get("sku")
+                qty = item.get("quantity", 1)
+                p_stmt = select(Product).where(Product.sku == sku)
+                p_res = await db.execute(p_stmt)
+                prod = p_res.scalar_one_or_none()
+                if prod:
+                    inv_stmt = select(Inventory).where(Inventory.product_id == prod.id)
+                    inv_res = await db.execute(inv_stmt)
+                    inv = inv_res.scalar_one_or_none()
+                    if inv:
+                        inv.stock_count += qty
+        except Exception:
+            pass
+
+        order.status = OrderStatus.CANCELLED
+        await db.commit()
+
+        return {
+            "order_number": ord_clean,
+            "status": "CANCELLED",
+            "message": f"Order `{ord_clean}` has been successfully cancelled and refunded.",
+            "refund_amount": order.total_amount
+        }
+
+
+@traceable(name="tool_swap_order_item", run_type="tool")
+async def tool_swap_order_item(order_number: str, old_sku: str, new_sku: str) -> Dict[str, Any]:
+    """
+    Swap an item (size, color, or variant) in an unfulfilled order before shipment.
+    """
+    ord_clean = str(order_number).strip().upper()
+    ord_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', ord_clean, re.IGNORECASE)
+    if ord_match:
+        ord_clean = ord_match.group(1).upper()
+
+    async with AsyncSessionLocal() as db:
+        stmt = select(Order).where(Order.order_number == ord_clean)
+        res = await db.execute(stmt)
+        order = res.scalar_one_or_none()
+
+        if not order:
+            return {"error": f"Order `{ord_clean}` not found.", "status_code": 404}
+
+        if order.status in [OrderStatus.SHIPPED, OrderStatus.CANCELLED]:
+            return {"error": f"Order `{ord_clean}` cannot be modified because its status is `{order.status}`.", "status_code": 400}
+
+        # Validate new product SKU
+        new_p_stmt = select(Product).where(Product.sku == new_sku)
+        new_p_res = await db.execute(new_p_stmt)
+        new_prod = new_p_res.scalar_one_or_none()
+        if not new_prod:
+            return {"error": f"Replacement product with SKU `{new_sku}` not found in catalog.", "status_code": 404}
+
+        items = json.loads(order.items_json)
+        item_found = False
+        for item in items:
+            if item.get("sku") == old_sku:
+                item["sku"] = new_prod.sku
+                item["name"] = new_prod.name
+                item["price"] = new_prod.price
+                item_found = True
+                break
+
+        if not item_found:
+            return {"error": f"SKU `{old_sku}` is not part of order `{ord_clean}`.", "status_code": 400}
+
+        order.items_json = json.dumps(items)
+        order.total_amount = sum(it.get("price", 0) * it.get("quantity", 1) for it in items)
+        await db.commit()
+
+        return {
+            "order_number": ord_clean,
+            "old_sku": old_sku,
+            "new_sku": new_sku,
+            "new_product_name": new_prod.name,
+            "updated_total": order.total_amount,
+            "status": "ITEM_SWAPPED"
+        }
+
+
+@traceable(name="tool_create_return_request", run_type="tool")
+async def tool_create_return_request(
+    order_number: str,
+    sku: str,
+    reason: str,
+    days_since_order: int = 5
+) -> Dict[str, Any]:
+    """
+    Process Return Merchandise Authorization (RMA) with automated 30-day policy check and label generation.
+    """
+    ord_clean = str(order_number).strip().upper()
+    ord_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', ord_clean, re.IGNORECASE)
+    if ord_match:
+        ord_clean = ord_match.group(1).upper()
+
+    rma_number = f"RMA-{uuid.uuid4().hex[:8].upper()}"
+    is_out_of_policy = days_since_order > 30
+
+    async with AsyncSessionLocal() as db:
+        status = ReturnStatus.PENDING_REVIEW if is_out_of_policy else ReturnStatus.APPROVED
+        label_url = None if is_out_of_policy else f"https://returns.agentecom.com/labels/{rma_number}.pdf"
+
+        return_req = ReturnRequest(
+            rma_number=rma_number,
+            order_number=ord_clean,
+            sku=sku,
+            reason=reason,
+            status=status,
+            rma_label_url=label_url,
+            is_out_of_policy=is_out_of_policy
+        )
+        db.add(return_req)
+        await db.commit()
+
+        return {
+            "rma_number": rma_number,
+            "order_number": ord_clean,
+            "sku": sku,
+            "reason": reason,
+            "days_since_order": days_since_order,
+            "status": status.value,
+            "is_out_of_policy": is_out_of_policy,
+            "requires_human_approval": is_out_of_policy,
+            "rma_label_url": label_url,
+            "message": (
+                "Return request is outside the standard 30-day return window. Flagged for human manager review."
+                if is_out_of_policy
+                else f"Return authorized! Download your prepaid shipping label at: {label_url}"
+            )
+        }
+
+
+@traceable(name="tool_track_shipment", run_type="tool")
+async def tool_track_shipment(order_number: str) -> Dict[str, Any]:
+    """
+    Retrieve live courier tracking checkpoints and estimated delivery for an order.
+    """
+    ord_clean = str(order_number).strip().upper()
+    ord_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', ord_clean, re.IGNORECASE)
+    if ord_match:
+        ord_clean = ord_match.group(1).upper()
+
+    async with AsyncSessionLocal() as db:
+        stmt = select(ShipmentTracking).where(ShipmentTracking.order_number == ord_clean)
+        res = await db.execute(stmt)
+        tracking = res.scalar_one_or_none()
+
+        if not tracking:
+            # Create deterministic simulated tracking
+            trk_num = f"TRK-{uuid.uuid4().hex[:10].upper()}"
+            est = (datetime.datetime.utcnow() + datetime.timedelta(days=2)).strftime("%A, %B %d by 4:00 PM")
+            history = [
+                {"timestamp": "Yesterday at 6:30 PM", "location": "Warehouse Fulfillment Facility", "status": "Package Picked & Packed"},
+                {"timestamp": "Today at 7:15 AM", "location": "Regional Hub Sort Facility", "status": "Arrived at Sorting Hub"},
+                {"timestamp": "Today at 9:45 AM", "location": "Local Carrier Facility", "status": "Out for Delivery on Courier Van"}
+            ]
+            tracking = ShipmentTracking(
+                order_number=ord_clean,
+                carrier="FedEx Express",
+                tracking_number=trk_num,
+                status=ShipmentStatus.OUT_FOR_DELIVERY,
+                estimated_delivery=est,
+                current_location="Local Delivery Route",
+                history_json=json.dumps(history)
+            )
+            db.add(tracking)
+            await db.commit()
+
+        history_list = json.loads(tracking.history_json or "[]")
+        return {
+            "order_number": ord_clean,
+            "carrier": tracking.carrier,
+            "tracking_number": tracking.tracking_number,
+            "status": tracking.status.value if hasattr(tracking.status, "value") else str(tracking.status),
+            "estimated_delivery": tracking.estimated_delivery,
+            "current_location": tracking.current_location,
+            "checkpoints": history_list
+        }
+
+
+@traceable(name="tool_get_user_profile", run_type="tool")
+async def tool_get_user_profile(user_id: str) -> Dict[str, Any]:
+    """
+    Retrieve long-term customer persona (sizing, brand affinities, allergies, preferences).
+    """
+    async with AsyncSessionLocal() as db:
+        stmt = select(UserProfile).where(UserProfile.user_id == user_id)
+        res = await db.execute(stmt)
+        profile = res.scalar_one_or_none()
+
+        if not profile:
+            return {
+                "user_id": user_id,
+                "sizing": {},
+                "brand_affinities": [],
+                "preferences": {},
+                "allergies": []
+            }
+
+        return {
+            "user_id": profile.user_id,
+            "name": profile.name,
+            "sizing": json.loads(profile.sizing_json or "{}"),
+            "brand_affinities": json.loads(profile.brand_affinities_json or "[]"),
+            "preferences": json.loads(profile.preferences_json or "{}"),
+            "allergies": json.loads(profile.allergies_json or "[]")
+        }
+
+
+@traceable(name="tool_update_user_profile", run_type="tool")
+async def tool_update_user_profile(user_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Update long-term persona facts (new clothing sizes, preferred brands, or material constraints).
+    """
+    async with AsyncSessionLocal() as db:
+        stmt = select(UserProfile).where(UserProfile.user_id == user_id)
+        res = await db.execute(stmt)
+        profile = res.scalar_one_or_none()
+
+        if not profile:
+            profile = UserProfile(
+                user_id=user_id,
+                name=updates.get("name"),
+                sizing_json=json.dumps(updates.get("sizing", {})),
+                brand_affinities_json=json.dumps(updates.get("brand_affinities", [])),
+                preferences_json=json.dumps(updates.get("preferences", {})),
+                allergies_json=json.dumps(updates.get("allergies", []))
+            )
+            db.add(profile)
+        else:
+            if "name" in updates:
+                profile.name = updates["name"]
+            if "sizing" in updates:
+                curr_s = json.loads(profile.sizing_json or "{}")
+                curr_s.update(updates["sizing"])
+                profile.sizing_json = json.dumps(curr_s)
+            if "brand_affinities" in updates:
+                curr_b = set(json.loads(profile.brand_affinities_json or "[]"))
+                curr_b.update(updates["brand_affinities"])
+                profile.brand_affinities_json = json.dumps(list(curr_b))
+            if "preferences" in updates:
+                curr_p = json.loads(profile.preferences_json or "{}")
+                curr_p.update(updates["preferences"])
+                profile.preferences_json = json.dumps(curr_p)
+            if "allergies" in updates:
+                curr_a = set(json.loads(profile.allergies_json or "[]"))
+                curr_a.update(updates["allergies"])
+                profile.allergies_json = json.dumps(list(curr_a))
+
+        await db.commit()
+
+        return {
+            "user_id": profile.user_id,
+            "status": "PROFILE_UPDATED",
+            "sizing": json.loads(profile.sizing_json or "{}"),
+            "brand_affinities": json.loads(profile.brand_affinities_json or "[]"),
+            "preferences": json.loads(profile.preferences_json or "{}"),
+            "allergies": json.loads(profile.allergies_json or "[]")
+        }

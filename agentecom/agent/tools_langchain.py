@@ -14,7 +14,13 @@ from agentecom.tools.commerce import (
     tool_check_inventory,
     tool_create_checkout_session,
     tool_confirm_checkout,
-    tool_get_orders
+    tool_get_orders,
+    tool_cancel_order,
+    tool_swap_order_item,
+    tool_create_return_request,
+    tool_track_shipment,
+    tool_get_user_profile,
+    tool_update_user_profile
 )
 
 @tool
@@ -126,6 +132,59 @@ async def confirm_checkout_order(session_id: Optional[str] = None, customer_emai
     )
     return json.dumps(res, indent=2)
 
+@tool
+async def cancel_order(order_number: str) -> str:
+    """
+    Cancel an existing unfulfilled order and issue an instant refund.
+    Call this when the user wants to cancel an order (e.g. 'cancel my order', 'cancel ORD-1234', 'stop this order').
+    """
+    res = await tool_cancel_order(order_number=order_number)
+    return json.dumps(res, indent=2)
+
+@tool
+async def swap_order_item(order_number: str, old_sku: str, new_sku: str) -> str:
+    """
+    Swap an item size, color, or variant on an existing order before shipment.
+    Call this when the user says 'swap my order size to M', 'change color of my ordered item', or 'exchange SKU in my order'.
+    """
+    res = await tool_swap_order_item(order_number=order_number, old_sku=old_sku, new_sku=new_sku)
+    return json.dumps(res, indent=2)
+
+@tool
+async def create_return_request(order_number: str, sku: str, reason: str, days_since_order: int = 5) -> str:
+    """
+    Initiate a return merchandise request (RMA) and generate prepaid shipping labels.
+    If days_since_order > 30, it flags for human manager approval.
+    Call this when the user says 'return my item', 'refund this product', 'it arrived damaged', 'it didn't fit'.
+    """
+    res = await tool_create_return_request(order_number=order_number, sku=sku, reason=reason, days_since_order=days_since_order)
+    return json.dumps(res, indent=2)
+
+@tool
+async def track_shipment(order_number: str) -> str:
+    """
+    Track live courier delivery checkpoints and estimated delivery time.
+    Call this when the user asks 'track my package', 'where is my shipment', 'tracking status', 'when will my order arrive'.
+    """
+    res = await tool_track_shipment(order_number=order_number)
+    return json.dumps(res, indent=2)
+
+@tool
+async def update_user_persona(user_id: str, sizing: Optional[Dict[str, Any]] = None, brand_affinities: Optional[List[str]] = None, allergies: Optional[List[str]] = None) -> str:
+    """
+    Persist long-term customer sizing, brand affinities, or constraints across sessions.
+    Call this when the user mentions their personal sizes or preferences (e.g. 'I wear size Medium', 'I am allergic to wool', 'I prefer FlexiSpot').
+    """
+    updates = {}
+    if sizing:
+        updates["sizing"] = sizing
+    if brand_affinities:
+        updates["brand_affinities"] = brand_affinities
+    if allergies:
+        updates["allergies"] = allergies
+    res = await tool_update_user_profile(user_id=user_id, updates=updates)
+    return json.dumps(res, indent=2)
+
 COMMERCE_TOOLS = [
     search_products,
     get_product_details,
@@ -133,5 +192,10 @@ COMMERCE_TOOLS = [
     add_to_cart,
     get_order_history,
     create_checkout_session,
-    confirm_checkout_order
+    confirm_checkout_order,
+    cancel_order,
+    swap_order_item,
+    create_return_request,
+    track_shipment,
+    update_user_persona
 ]

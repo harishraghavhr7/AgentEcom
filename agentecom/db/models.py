@@ -94,3 +94,68 @@ class Order(Base):
     status = Column(SQLEnum(OrderStatus), default=OrderStatus.CONFIRMED)
     customer_email = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class ReturnStatus(str, enum.Enum):
+    PENDING_REVIEW = "PENDING_REVIEW"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+
+
+class ShipmentStatus(str, enum.Enum):
+    ORDER_PLACED = "ORDER_PLACED"
+    PROCESSING = "PROCESSING"
+    IN_TRANSIT = "IN_TRANSIT"
+    OUT_FOR_DELIVERY = "OUT_FOR_DELIVERY"
+    DELIVERED = "DELIVERED"
+
+
+class UserProfile(Base):
+    """
+    Long-term cross-session user persona memory (sizing, brand affinities, allergies, budget).
+    """
+    __tablename__ = "user_profiles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(128), unique=True, index=True, nullable=False)
+    name = Column(String(128), nullable=True)
+    sizing_json = Column(Text, default="{}")  # e.g. {"clothing": "M", "shoe": 10}
+    brand_affinities_json = Column(Text, default="[]")  # e.g. ["FlexiSpot", "Fellow"]
+    preferences_json = Column(Text, default="{}")  # e.g. {"fit": "oversized", "budget_tier": "mid-range"}
+    allergies_json = Column(Text, default="[]")  # e.g. ["latex", "wool"]
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+
+class ReturnRequest(Base):
+    """
+    Post-purchase Return Merchandise Authorization (RMA) record.
+    """
+    __tablename__ = "return_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    rma_number = Column(String(64), unique=True, index=True, nullable=False)
+    order_number = Column(String(64), index=True, nullable=False)
+    sku = Column(String(64), nullable=False)
+    reason = Column(String(255), nullable=False)
+    status = Column(SQLEnum(ReturnStatus), default=ReturnStatus.APPROVED, index=True)
+    rma_label_url = Column(String(255), nullable=True)
+    is_out_of_policy = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+
+class ShipmentTracking(Base):
+    """
+    Simulated live courier tracking and delivery timeline.
+    """
+    __tablename__ = "shipment_trackings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_number = Column(String(64), unique=True, index=True, nullable=False)
+    carrier = Column(String(64), default="FedEx Express")
+    tracking_number = Column(String(128), unique=True, index=True, nullable=False)
+    status = Column(SQLEnum(ShipmentStatus), default=ShipmentStatus.IN_TRANSIT)
+    estimated_delivery = Column(String(128), nullable=True)
+    current_location = Column(String(128), default="Regional Distribution Center")
+    history_json = Column(Text, default="[]")
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)

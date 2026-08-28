@@ -38,8 +38,7 @@
                 <span class="text-slate-400">Provider:</span>
                 <select id="providerSelect" onchange="handleProviderChange()" class="bg-slate-900 text-cyan-300 font-medium border-0 focus:outline-none cursor-pointer rounded px-1.5 py-0.5">
                     <option value="groq" selected>⚡ Groq API (Llama 3.3)</option>
-                    <option value="ollama">🦙 Ollama (Local)</option>
-                    <option value="local">⚡ Local Zero-Key</option>
+                    <option value="local">⚡ Local Fallback (Zero-Key)</option>
                 </select>
             </div>
 
@@ -96,6 +95,15 @@
                 <button onclick="sendQuickPrompt('electric gooseneck kettle')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
                     ☕ Gooseneck Kettle
                 </button>
+                <button onclick="sendQuickPrompt('track my package')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
+                    📦 Track Shipment
+                </button>
+                <button onclick="sendQuickPrompt('return my order')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
+                    🔄 Return / RMA
+                </button>
+                <button onclick="sendQuickPrompt('cancel my order')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
+                    🛑 Cancel Order
+                </button>
                 <button onclick="sendQuickPrompt('view cart')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
                     🛒 View Cart
                 </button>
@@ -104,16 +112,28 @@
                 </button>
             </div>
 
-            <!-- Input Area -->
+            <!-- Input Area with Voice Shopping -->
             <div class="p-4 bg-slate-900 border-t border-slate-800">
                 <form id="chatForm" onsubmit="handleChatSubmit(event)" class="flex gap-2">
                     <input 
                         type="text" 
                         id="chatInput" 
-                        placeholder="Search products, check SKU, ask questions, or checkout..."
+                        placeholder="Search products, check stock, speak by voice, track orders, or checkout..."
                         class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition shadow-inner"
                         autocomplete="off"
                     />
+                    <!-- Voice Shopping Mic Button -->
+                    <button 
+                        type="button" 
+                        id="voiceBtn" 
+                        onclick="toggleVoiceShopping()" 
+                        class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-cyan-500 font-medium px-3.5 py-3 rounded-xl text-sm transition flex items-center gap-1.5 shadow"
+                        title="Voice Shopping (Hands-Free Dictation)"
+                    >
+                        <span id="voiceIcon">🎙️</span>
+                        <span id="voiceLabel" class="hidden sm:inline text-xs font-semibold">Voice</span>
+                    </button>
+
                     <button 
                         type="submit" 
                         id="sendBtn"
@@ -162,11 +182,24 @@
                 </div>
             </div>
 
-            <!-- Active Shopping Cart Drawer -->
-            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-3">
+            <!-- Long-Term User Persona Memory Widget -->
+            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-2 text-xs">
                 <div class="flex items-center justify-between">
-                    <h3 class="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-1.5">
-                        <span>🛒</span> Live Cart
+                    <h4 class="font-semibold text-slate-200 flex items-center gap-1.5">
+                        <span>👤</span> Long-Term User Persona
+                    </h4>
+                    <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-mono border border-emerald-500/30">Cross-Session</span>
+                </div>
+                <div id="personaDisplay" class="space-y-1.5 text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
+                    <p class="text-slate-500 italic">No custom persona saved yet. (e.g. say "my size is M and I prefer FlexiSpot").</p>
+                </div>
+            </div>
+
+            <!-- Active Shopping Cart Drawer -->
+            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                        <span>🛒</span> Live Shopping Cart
                     </h3>
                     <span id="cartCountBadge" class="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full font-medium border border-cyan-500/30">0 items</span>
                 </div>
@@ -210,14 +243,15 @@
                 </div>
             </div>
 
-            <!-- Idempotency & Isolation Tracker -->
+            <!-- Idempotency & Session State -->
             <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
                 <h4 class="font-semibold text-slate-300 flex items-center gap-1.5">
-                    <span>🛡️</span> Idempotency & Session State
+                    <span>🛡️</span> Idempotency & Security
                 </h4>
                 <div class="space-y-1 text-slate-400">
                     <p>Session: <code id="activeSessionId" class="text-cyan-400 text-[11px]">-</code></p>
                     <p>Active LLM: <code id="activeModelLabel" class="text-cyan-300 text-[11px]">⚡ Groq API (Llama 3.3)</code></p>
+                    <p id="guardrailStatus" class="text-emerald-400 text-[11px]">🛡️ Guardrail: Active & Enforced</p>
                 </div>
             </div>
 
@@ -237,15 +271,11 @@
                 <div>
                     <label class="block font-medium text-slate-300 mb-1">Groq API Key (Optional)</label>
                     <input type="password" id="groqApiKeyInput" placeholder="gsk_..." class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
-                    <p class="text-[10px] text-slate-500 mt-1">Used when Provider is set to 'Groq API'.</p>
-                </div>
-                <div>
-                    <label class="block font-medium text-slate-300 mb-1">Ollama Base URL</label>
-                    <input type="text" id="ollamaUrlInput" value="http://localhost:11434" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                    <p class="text-[10px] text-slate-500 mt-1">Used when Provider is set to '⚡ Groq API'. If left blank or unavailable, system automatically uses the Local Zero-Key Fallback Planner.</p>
                 </div>
                 <div>
                     <label class="block font-medium text-slate-300 mb-1">Model Name</label>
-                    <input type="text" id="modelNameInput" placeholder="llama-3.3-70b-versatile or llama3.2" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                    <input type="text" id="modelNameInput" placeholder="llama-3.3-70b-versatile" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
                 </div>
             </div>
 
@@ -260,7 +290,85 @@
     <!-- JavaScript Logic -->
     <script>
         let currentSessionId = "sess_" + Math.random().toString(36).substring(2, 10);
+        let isVoiceActive = false;
+        let recognition = null;
+
         document.getElementById('activeSessionId').textContent = currentSessionId;
+
+        // Initialize Web Speech API
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRec();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                isVoiceActive = true;
+                const btn = document.getElementById('voiceBtn');
+                btn.className = "bg-rose-600 border border-rose-400 text-white font-medium px-3.5 py-3 rounded-xl text-sm transition flex items-center gap-1.5 shadow animate-pulse";
+                document.getElementById('voiceIcon').textContent = '🔴';
+                document.getElementById('chatInput').placeholder = '🎙️ Listening... speak your order or search request!';
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                document.getElementById('chatInput').value = transcript;
+                stopVoiceShopping();
+                handleChatSubmit(new Event('submit'));
+            };
+
+            recognition.onerror = (e) => {
+                console.warn("Speech recognition error:", e);
+                stopVoiceShopping();
+            };
+
+            recognition.onend = () => {
+                stopVoiceShopping();
+            };
+        }
+
+        function toggleVoiceShopping() {
+            if (!recognition) {
+                alert("Speech recognition is not supported in this browser. Please use Google Chrome, Microsoft Edge, or Safari.");
+                return;
+            }
+            if (isVoiceActive) {
+                recognition.stop();
+                stopVoiceShopping();
+            } else {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.error("Failed to start voice recognition:", e);
+                }
+            }
+        }
+
+        function stopVoiceShopping() {
+            isVoiceActive = false;
+            const btn = document.getElementById('voiceBtn');
+            if (btn) {
+                btn.className = "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-cyan-500 font-medium px-3.5 py-3 rounded-xl text-sm transition flex items-center gap-1.5 shadow";
+                document.getElementById('voiceIcon').textContent = '🎙️';
+                document.getElementById('chatInput').placeholder = 'Search products, check stock, speak by voice, track orders, or checkout...';
+            }
+        }
+
+        function speakAssistantResponse(markdownText) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const plainText = markdownText
+                    .replace(/[\*\_\[\]\(\)\#\`]/g, '')
+                    .replace(/https?:\/\/\S+/g, '')
+                    .replace(/<[^>]*>/g, '')
+                    .trim();
+                const utterance = new SpeechSynthesisUtterance(plainText);
+                utterance.rate = 1.05;
+                utterance.pitch = 1.0;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
 
         function toggleSettingsModal() {
             document.getElementById('configModal').classList.toggle('hidden');
@@ -306,16 +414,21 @@
                     body: JSON.stringify({
                         message: userMsg,
                         session_id: currentSessionId,
+                        user_id: "default_shopper",
                         llm_provider: provider,
                         llm_api_key: groqKey || undefined,
                         model_name: modelName || undefined,
-                        ollama_base_url: ollamaUrl || undefined
+                        ollama_base_url: ollamaUrl || undefined,
+                        voice_mode: isVoiceActive
                     })
                 });
 
                 const data = await response.json();
                 appendAssistantMessage(data.reply, data.products, data.fallback_active, data.readability?.fallback_reason);
                 updateTelemetry(data);
+                if (data.voice_mode) {
+                    speakAssistantResponse(data.reply);
+                }
             } catch (err) {
                 appendAssistantMessage("⚠️ Error contacting AgentEcom server: " + err.message);
             } finally {
@@ -414,6 +527,35 @@
                 document.getElementById('activeModelLabel').innerHTML = `<span class="text-amber-300 font-semibold">⚡ Offline Fallback Planner</span>`;
             } else if (r && r.llm_provider) {
                 document.getElementById('activeModelLabel').innerHTML = `<span class="text-cyan-300">⚡ ${r.llm_provider.toUpperCase()} API</span>`;
+            }
+
+            // Update Guardrail Status Badge
+            const guardBadge = document.getElementById('guardrailStatus');
+            if (data.security_flag) {
+                guardBadge.className = "text-rose-400 font-bold text-[11px]";
+                guardBadge.innerHTML = `⛔ Guardrail Triggered: ${escapeHtml(data.security_flag)}`;
+            } else {
+                guardBadge.className = "text-emerald-400 text-[11px]";
+                guardBadge.innerHTML = `🛡️ Guardrail: Active & Enforced`;
+            }
+
+            // Update Long-Term User Persona Display
+            const persona = data.user_persona;
+            const personaContainer = document.getElementById('personaDisplay');
+            if (persona && (Object.keys(persona.sizing || {}).length > 0 || (persona.brand_affinities || []).length > 0 || (persona.allergies || []).length > 0)) {
+                let pHtml = '<div class="space-y-1">';
+                if (persona.sizing && Object.keys(persona.sizing).length > 0) {
+                    const sizes = Object.entries(persona.sizing).map(([k, v]) => `${k.toUpperCase()}: ${v}`).join(', ');
+                    pHtml += `<div><span class="text-slate-400">📏 Sizing:</span> <span class="text-cyan-300 font-semibold">${escapeHtml(sizes)}</span></div>`;
+                }
+                if (persona.brand_affinities && persona.brand_affinities.length > 0) {
+                    pHtml += `<div><span class="text-slate-400">🏷️ Favorite Brands:</span> <span class="text-emerald-400 font-semibold">${escapeHtml(persona.brand_affinities.join(', '))}</span></div>`;
+                }
+                if (persona.allergies && persona.allergies.length > 0) {
+                    pHtml += `<div><span class="text-slate-400">⚠️ Constraints:</span> <span class="text-amber-400 font-semibold">${escapeHtml(persona.allergies.join(', '))}</span></div>`;
+                }
+                pHtml += '</div>';
+                personaContainer.innerHTML = pHtml;
             }
 
             // Update Short-Term Working Memory Section

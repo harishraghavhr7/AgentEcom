@@ -58,37 +58,44 @@ class AutonomousCommerceAgent:
         self,
         user_input: str,
         session_id: Optional[str] = None,
-        llm_api_key: Optional[str] = None,
         llm_provider: str = "groq",
+        llm_api_key: Optional[str] = None,
         model_name: Optional[str] = None,
-        ollama_base_url: Optional[str] = None
+        ollama_base_url: Optional[str] = None,
+        user_id: Optional[str] = None,
+        voice_mode: bool = False
     ) -> Dict[str, Any]:
         """
-        Process a user conversation turn through the LangGraph StateGraph workflow
-        with full short-term conversational working memory and multi-turn context.
+        Processes a multi-turn user conversation step through the upgraded LangGraph workflow.
         """
         start_time = time.perf_counter()
         session = self.get_or_create_session(session_id)
-        session["updated_at"] = time.time()
 
-        # Reconstruct recent conversation messages (sliding window of last 10 messages for short-term memory)
-        history_messages = []
-        for m in session.get("messages", [])[-10:]:
-            role = m.get("role")
-            content = m.get("content", "")
+        # Reconstruct LangChain BaseMessage history
+        history_messages: List[BaseMessage] = []
+        for msg in session["messages"]:
+            role = msg.get("role")
+            content = msg.get("content", "")
             if role == "user":
                 history_messages.append(HumanMessage(content=content))
             elif role == "assistant":
                 history_messages.append(AIMessage(content=content))
         history_messages.append(HumanMessage(content=user_input))
 
+        u_id = user_id or session.get("user_id") or "default_shopper"
+        session["user_id"] = u_id
+
         # Build initial LangGraph state with persistent short-term memory
         initial_state: AgentState = {
             "messages": history_messages,
             "session_id": session["session_id"],
+            "user_id": u_id,
+            "user_persona": session.get("user_persona", {}),
             "cart": session.get("cart", []),
             "checkout_session": session.get("checkout_session"),
             "order": session.get("order"),
+            "active_return_request": session.get("active_return_request"),
+            "tracking_info": session.get("tracking_info"),
             "tool_calls_made": [],
             "retrieved_products": session.get("retrieved_products", []),
             "short_term_memory": session.get("short_term_memory", {
@@ -98,11 +105,17 @@ class AutonomousCommerceAgent:
                 "last_category": None,
                 "user_preferences": {}
             }),
+            "security_flag": None,
+            "security_reason": None,
+            "requires_human_approval": False,
+            "voice_mode": voice_mode,
             "readability": None,
             "provider": llm_provider or "groq",
             "model_name": model_name,
             "groq_api_key": llm_api_key,
             "ollama_base_url": ollama_base_url,
+            "fallback_active": False,
+            "fallback_reason": None,
             "start_time": start_time
         }
 
@@ -112,6 +125,7 @@ class AutonomousCommerceAgent:
             "tags": ["AgentEcom", llm_provider, model_name or "default"],
             "metadata": {
                 "session_id": session["session_id"],
+                "user_id": u_id,
                 "llm_provider": llm_provider,
                 "model_name": model_name,
                 "cart_items_count": len(session.get("cart", [])),
@@ -130,6 +144,9 @@ class AutonomousCommerceAgent:
         session["cart"] = result_state.get("cart", [])
         session["checkout_session"] = result_state.get("checkout_session")
         session["order"] = result_state.get("order")
+        session["active_return_request"] = result_state.get("active_return_request")
+        session["tracking_info"] = result_state.get("tracking_info")
+        session["user_persona"] = result_state.get("user_persona", session.get("user_persona", {}))
         session["retrieved_products"] = result_state.get("retrieved_products", session.get("retrieved_products", []))
         session["short_term_memory"] = result_state.get("short_term_memory", session.get("short_term_memory", {}))
         session["messages"].append({"role": "user", "content": user_input})
@@ -138,13 +155,20 @@ class AutonomousCommerceAgent:
         return {
             "reply": final_msg,
             "session_id": session["session_id"],
+            "user_id": u_id,
+            "user_persona": session["user_persona"],
             "tool_calls_made": result_state.get("tool_calls_made", []),
             "products": result_state.get("retrieved_products", []),
             "cart": session["cart"],
             "checkout_session": session["checkout_session"],
             "order": session["order"],
+            "active_return_request": session["active_return_request"],
+            "tracking_info": session["tracking_info"],
             "short_term_memory": session["short_term_memory"],
             "fallback_active": bool(result_state.get("fallback_active", False)),
+            "security_flag": result_state.get("security_flag"),
+            "requires_human_approval": bool(result_state.get("requires_human_approval", False)),
+            "voice_mode": voice_mode,
             "readability": result_state.get("readability", {})
         }
 

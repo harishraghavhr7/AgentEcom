@@ -25,10 +25,9 @@ class Settings(BaseSettings):
     # Sync & Workers
     ASYNC_INDEXING_WORKER: bool = True
 
-    # LLM Providers Configuration
+    # LLM Providers Configuration (Groq Cloud API & Local Zero-Key Fallback)
     GROQ_API_KEY: Optional[str] = os.getenv("GROQ_API_KEY")
     GROQ_MODEL_NAME: str = os.getenv("GROQ_MODEL_NAME", "llama-3.3-70b-versatile")
-    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     DEFAULT_LLM_PROVIDER: str = os.getenv("DEFAULT_LLM_PROVIDER", "groq")
 
     # LangSmith Observability & Tracing
