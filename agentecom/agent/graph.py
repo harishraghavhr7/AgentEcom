@@ -261,20 +261,20 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             
             # Check native tool calls
             if getattr(response, "tool_calls", None):
-                return {"messages": [response]}
+                return {"messages": [response], "fallback_active": False, "fallback_reason": None}
             
             # Check extracted JSON tool calls in text content
             extracted_calls = extract_json_tool_calls(getattr(response, "content", ""))
             if extracted_calls:
-                return {"messages": [AIMessage(content="", tool_calls=extracted_calls)]}
+                return {"messages": [AIMessage(content="", tool_calls=extracted_calls)], "fallback_active": False, "fallback_reason": None}
 
             # If we just executed a tool, LLM synthesized response is complete
             last_is_tool = isinstance(state["messages"][-1], ToolMessage) or (hasattr(state["messages"][-1], "tool_call_id") and getattr(state["messages"][-1], "tool_call_id", None))
             if last_is_tool:
                 tool_content = state["messages"][-1].content
                 if response.content and any(w in response.content.lower() for w in ["order", "purchase", "product", "item", "cart", "checkout", "stock", "found", "total", "session", "placed", "confirmed", "price"]):
-                    return {"messages": [response]}
-                return {"messages": [AIMessage(content=tool_content)]}
+                    return {"messages": [response], "fallback_active": False, "fallback_reason": None}
+                return {"messages": [AIMessage(content=tool_content)], "fallback_active": False, "fallback_reason": None}
 
             # Detect if user requested an actionable commerce action
             sku_match = re.search(r'\b([A-Z0-9]{3,8}-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
@@ -285,14 +285,14 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             )
             # If purely conversational with no commerce action, return the LLM response
             if not commerce_action_detected and response.content:
-                return {"messages": [response]}
+                return {"messages": [response], "fallback_active": False, "fallback_reason": None}
         except Exception:
             pass
 
     # If the last message was a tool execution result and LLM is unavailable, return synthesized ToolMessage content
     last_is_tool = isinstance(state["messages"][-1], ToolMessage) or (hasattr(state["messages"][-1], "tool_call_id") and getattr(state["messages"][-1], "tool_call_id", None))
     if last_is_tool:
-        return {"messages": [AIMessage(content=state["messages"][-1].content)]}
+        return {"messages": [AIMessage(content=state["messages"][-1].content)], "fallback_active": True, "fallback_reason": "LLM offline/unavailable; used tool synthesis fallback"}
 
     # Deterministic Local Tool Planner & Intent Router (Zero-Key / Offline Fallback)
     tool_calls = []
@@ -537,13 +537,21 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             clean_q = re.sub(r'(?:under|less\s+than|max|below|cheaper\s+than)\s*\$?\d+(?:\.\d+)?', '', clean_q, flags=re.IGNORECASE).strip()
 
         for prefix in [
+            "get me information about the", "get me information about", "get me information of the",
+            "get me information of", "get me info about", "get information about", "give me information about",
+            "tell me about the", "tell me about", "information about the", "information about",
+            "info about the", "info about", "details about the", "details about", "details for the", "details for",
             "what are the products there", "what are the products", "what products do you have",
             "show all products", "show products", "list products", "browse catalog",
-            "find me", "find", "search for", "search", "show me", "i am looking for",
-            "looking for", "can you show", "show"
+            "find me a", "find me", "find a", "find", "search for a", "search for", "search",
+            "show me a", "show me", "i am looking for a", "i am looking for", "looking for a", "looking for",
+            "can you show", "show"
         ]:
             if clean_q.lower().startswith(prefix):
                 clean_q = clean_q[len(prefix):].strip()
+
+        is_single_item_query = bool(re.search(r'\b(alone|only|single|specifically|this\s+one|about\s+the|tell\s+me\s+about|information\s+about|info\s+about|details\s+about|specs\s+of)\b', low))
+        clean_q = re.sub(r'\b(alone|only|specifically|please)\b', '', clean_q, flags=re.IGNORECASE).strip()
 
         # Follow-up search contextual refinement using short-term memory
         if (not clean_q or clean_q.lower() in ["cheaper", "cheaper ones", "options", "more", "under", ""]) and recent_queries:
@@ -551,9 +559,11 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
         elif not clean_q:
             clean_q = "products"
 
+        search_limit = 1 if (is_single_item_query and "show all" not in low and "browse" not in low) else 6
+
         tool_calls.append({
             "name": "search_products",
-            "args": {"query": clean_q, "max_price": max_p, "limit": 6},
+            "args": {"query": clean_q, "max_price": max_p, "limit": search_limit},
             "id": f"call_{uuid.uuid4().hex[:8]}"
         })
 
@@ -572,7 +582,7 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
             )
         )
 
-    return {"messages": [ai_msg]}
+    return {"messages": [ai_msg], "fallback_active": True, "fallback_reason": "Offline zero-key local planner active"}
 
 
 async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
@@ -598,6 +608,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
         short_term_memory["recent_queries"] = []
     active_prod = short_term_memory.get("active_product")
     recent_skus = list(short_term_memory.get("recent_skus", []))
+    recent_queries = list(short_term_memory.get("recent_queries", []))
 
     for tc in tool_calls:
         tool_name = tc.get("name")
@@ -626,6 +637,10 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
 
             # Clean search query prefixes
             for prefix in [
+                "get me information about the", "get me information about", "get me information of the",
+                "get me information of", "get me info about", "get information about", "give me information about",
+                "tell me about the", "tell me about", "information about the", "information about",
+                "info about the", "info about", "details about the", "details about", "details for the", "details for",
                 "find me a", "find me", "find a", "find", "search for a", "search for", "search",
                 "show me a", "show me", "show all products", "show products", "show", "what are the products there",
                 "what are the products", "what products do you have", "browse catalog", "looking for a", "looking for",
@@ -633,6 +648,8 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
             ]:
                 if q_text.lower().startswith(prefix):
                     q_text = q_text[len(prefix):].strip()
+
+            q_text = re.sub(r'\b(alone|only|specifically|please)\b', '', q_text, flags=re.IGNORECASE).strip()
 
             last_user_msg = next((m.content for m in reversed(state.get("messages", [])) if isinstance(m, HumanMessage)), "")
             is_pure_refinement = bool(re.match(r'^(?:under|below|less\s+than|cheaper\s+than|max)\s*\$?\d+$', last_user_msg.strip(), re.IGNORECASE)) or last_user_msg.strip().lower() in ["cheaper", "cheaper ones", "options", "more"]
@@ -681,13 +698,29 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
             elif prods and prods[0].get("category"):
                 short_term_memory["last_category"] = prods[0].get("category")
 
-            lines = [f"I found **{len(prods)} product(s)** in the catalog:\n"]
-            for p in prods:
-                attrs_preview = ", ".join([f"{k}: {v}" for k, v in list((p.get("attributes") or {}).items())[:2]]) if p.get("attributes") else ""
-                attrs_line = f"  *Specs: {attrs_preview}*\n" if attrs_preview else ""
-                lines.append(f"- **{p['name']}** (`{p['sku']}`) — **${p['price']:.2f}** *(RRF Score: {p.get('_rrf_score', 0):.4f})*\n{attrs_line}  {p.get('description', '')[:100]}...")
-            lines.append("\n💡 *To add an item to your cart, click '+ Add to Cart' or reply `Add [SKU] to cart` or `Add this product to the cart`.*")
-            result_str = "\n".join(lines)
+            if len(prods) == 1:
+                p = prods[0]
+                attrs_dict = p.get("attributes", {})
+                attrs_formatted = ", ".join([f"{k}: {v}" for k, v in attrs_dict.items()]) if attrs_dict else "None"
+                lines = [
+                    f"### 🛍️ {p['name']} (`{p['sku']}`)\n",
+                    f"- **Price**: **${p['price']:.2f}**",
+                    f"- **Category**: {p.get('category', 'N/A')}",
+                    f"- **Stock Availability**: {p.get('stock', p.get('stock_count', 'In stock'))} units available",
+                ]
+                if attrs_dict:
+                    lines.append(f"- **Attributes & Specs**: {attrs_formatted}")
+                lines.append(f"- **Description**: {p.get('description', '')}\n")
+                lines.append(f"💡 *To purchase, click `+ Add to Cart` or reply `Add {p['sku']} to cart`.*")
+                result_str = "\n".join(lines)
+            else:
+                lines = [f"I found **{len(prods)} product(s)** in the catalog:\n"]
+                for p in prods:
+                    attrs_preview = ", ".join([f"{k}: {v}" for k, v in list((p.get("attributes") or {}).items())[:2]]) if p.get("attributes") else ""
+                    attrs_line = f"  *Specs: {attrs_preview}*\n" if attrs_preview else ""
+                    lines.append(f"- **{p['name']}** (`{p['sku']}`) — **${p['price']:.2f}**\n{attrs_line}  {p.get('description', '')[:120]}...")
+                lines.append("\n💡 *To add an item to your cart, click '+ Add to Cart' or reply `Add [SKU] to cart` or `Add this product to the cart`.*")
+                result_str = "\n".join(lines)
 
         elif tool_name == "get_product_details":
             sku = args.get("sku", "")
@@ -1038,7 +1071,9 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
             "short_term_memory": short_term_memory,
             "cart": cart,
             "checkout_session": checkout_session,
-            "order": order
+            "order": order,
+            "fallback_active": state.get("fallback_active", False),
+            "fallback_reason": state.get("fallback_reason")
         }
     else:
         # Local zero-key fallback mode
@@ -1052,7 +1087,9 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
             "short_term_memory": short_term_memory,
             "cart": cart,
             "checkout_session": checkout_session,
-            "order": order
+            "order": order,
+            "fallback_active": True,
+            "fallback_reason": "Zero-key offline tool execution"
         }
 
 
@@ -1073,6 +1110,9 @@ async def readability_auditor_node(state: AgentState) -> Dict[str, Any]:
 
     executed_tools = [tc["tool"] for tc in state.get("tool_calls_made", [])]
 
+    is_fallback = bool(state.get("fallback_active", False))
+    provider_used = "local_fallback" if is_fallback else state.get("provider", "groq")
+
     readability = {
         "estimated_raw_tokens": est_raw_tokens,
         "compressed_tool_tokens": compressed_tokens,
@@ -1081,10 +1121,13 @@ async def readability_auditor_node(state: AgentState) -> Dict[str, Any]:
         "execution_latency_ms": round(elapsed_ms, 3),
         "cache_hits": cache.metrics.hits,
         "tools_executed": executed_tools,
-        "graph_steps": len(state.get("messages", []))
+        "graph_steps": len(state.get("messages", [])),
+        "fallback_active": is_fallback,
+        "llm_provider": provider_used,
+        "fallback_reason": state.get("fallback_reason", "Local offline fallback planner active" if is_fallback else None)
     }
 
-    return {"readability": readability}
+    return {"readability": readability, "fallback_active": is_fallback}
 
 
 def should_continue(state: AgentState) -> str:

@@ -25,6 +25,12 @@ class Settings(BaseSettings):
     # Sync & Workers
     ASYNC_INDEXING_WORKER: bool = True
 
+    # LLM Providers Configuration
+    GROQ_API_KEY: Optional[str] = os.getenv("GROQ_API_KEY")
+    GROQ_MODEL_NAME: str = os.getenv("GROQ_MODEL_NAME", "llama-3.3-70b-versatile")
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    DEFAULT_LLM_PROVIDER: str = os.getenv("DEFAULT_LLM_PROVIDER", "groq")
+
     # LangSmith Observability & Tracing
     LANGSMITH_TRACING: bool = os.getenv("LANGSMITH_TRACING", "false").lower() in ["true", "1", "yes"]
     LANGSMITH_API_KEY: Optional[str] = os.getenv("LANGSMITH_API_KEY")
@@ -34,6 +40,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(case_sensitive=True, env_file=".env", extra="allow")
 
 settings = Settings()
+
+# Ensure GROQ_API_KEY is available in os.environ for LangChain/Groq
+if settings.GROQ_API_KEY:
+    os.environ["GROQ_API_KEY"] = settings.GROQ_API_KEY
 
 # Ensure LangSmith environment variables are set for LangChain/LangGraph automatic tracing
 if settings.LANGSMITH_TRACING and settings.LANGSMITH_API_KEY:

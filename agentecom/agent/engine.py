@@ -144,6 +144,7 @@ class AutonomousCommerceAgent:
             "checkout_session": session["checkout_session"],
             "order": session["order"],
             "short_term_memory": session["short_term_memory"],
+            "fallback_active": bool(result_state.get("fallback_active", False)),
             "readability": result_state.get("readability", {})
         }
 

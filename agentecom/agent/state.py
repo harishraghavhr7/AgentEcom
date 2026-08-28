@@ -17,6 +17,9 @@ class ReadabilityMetric(BaseModel):
     cache_hits: int = 0
     tools_executed: List[str] = Field(default_factory=list)
     graph_steps: int = 0
+    fallback_active: bool = False
+    llm_provider: str = "groq"
+    fallback_reason: Optional[str] = None
 
 class ShortTermMemory(BaseModel):
     active_product: Optional[Dict[str, Any]] = None  # Last focused/retrieved product with full attributes & specs
@@ -37,6 +40,7 @@ class AgentResponse(BaseModel):
     checkout_session: Optional[Dict[str, Any]] = None
     order: Optional[Dict[str, Any]] = None
     short_term_memory: Optional[Dict[str, Any]] = None
+    fallback_active: bool = False
     readability: ReadabilityMetric = Field(default_factory=ReadabilityMetric)
 
 class AgentState(TypedDict):
@@ -53,5 +57,7 @@ class AgentState(TypedDict):
     model_name: Optional[str]
     groq_api_key: Optional[str]
     ollama_base_url: Optional[str]
+    fallback_active: Optional[bool]
+    fallback_reason: Optional[str]
     start_time: float
 

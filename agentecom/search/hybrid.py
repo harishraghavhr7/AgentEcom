@@ -212,13 +212,18 @@ class HybridSearchEngine:
         elapsed_ms = (time.perf_counter() - start_time) * 1000
 
         output = []
-        for item in sorted_results[:top_k]:
-            prod_out = dict(item["product"])
-            prod_out["_rrf_score"] = round(item["rrf_score"], 6)
-            prod_out["_bm25_rank"] = item["bm25_rank"]
-            prod_out["_dense_rank"] = item["dense_rank"]
-            prod_out["_retrieval_method"] = "hybrid_rrf"
-            output.append(prod_out)
+        if sorted_results:
+            top_score = sorted_results[0]["rrf_score"]
+            for item in sorted_results[:top_k]:
+                # If top match is strong, prune distant low-confidence items
+                if len(sorted_results) > 1 and item["rrf_score"] < (top_score * 0.50) and len(output) >= 1:
+                    continue
+                prod_out = dict(item["product"])
+                prod_out["_rrf_score"] = round(item["rrf_score"], 6)
+                prod_out["_bm25_rank"] = item["bm25_rank"]
+                prod_out["_dense_rank"] = item["dense_rank"]
+                prod_out["_retrieval_method"] = "hybrid_rrf"
+                output.append(prod_out)
 
         return output
 

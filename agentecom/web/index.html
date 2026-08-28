@@ -314,7 +314,7 @@
                 });
 
                 const data = await response.json();
-                appendAssistantMessage(data.reply, data.products);
+                appendAssistantMessage(data.reply, data.products, data.fallback_active, data.readability?.fallback_reason);
                 updateTelemetry(data);
             } catch (err) {
                 appendAssistantMessage("⚠️ Error contacting AgentEcom server: " + err.message);
@@ -340,9 +340,20 @@
             thread.scrollTop = thread.scrollHeight;
         }
 
-        function appendAssistantMessage(markdownText, products = []) {
+        function appendAssistantMessage(markdownText, products = [], fallbackActive = false, fallbackReason = null) {
             const thread = document.getElementById('chatThread');
             
+            let fallbackNoticeHtml = '';
+            if (fallbackActive) {
+                fallbackNoticeHtml = `
+                    <div class="inline-flex items-center gap-1.5 bg-amber-500/15 text-amber-300 border border-amber-500/40 text-[10px] px-2.5 py-1 rounded-full font-medium mb-1 shadow-sm">
+                        <span class="text-amber-400">⚡</span>
+                        <span class="font-semibold">Offline Fallback Active</span>
+                        ${fallbackReason ? `<span class="text-amber-400/80">• ${escapeHtml(fallbackReason)}</span>` : ''}
+                    </div>
+                `;
+            }
+
             let productCardsHtml = '';
             if (products && products.length > 0) {
                 productCardsHtml = `
@@ -378,6 +389,7 @@
                         🦜
                     </div>
                     <div class="max-w-[85%] bg-slate-800/90 border border-slate-700 rounded-2xl rounded-tl-none p-4 text-slate-200 text-sm shadow-md space-y-2">
+                        ${fallbackNoticeHtml}
                         <div class="prose prose-invert prose-sm max-w-none text-slate-200">
                             ${parsedMarkdown}
                         </div>
@@ -396,6 +408,12 @@
                 document.getElementById('metricTokenReduction').textContent = `${r.token_reduction_pct}%`;
                 document.getElementById('metricRawTokens').textContent = r.estimated_raw_tokens;
                 document.getElementById('metricToolTokens').textContent = r.compressed_tool_tokens;
+            }
+
+            if (data.fallback_active || (r && r.fallback_active)) {
+                document.getElementById('activeModelLabel').innerHTML = `<span class="text-amber-300 font-semibold">⚡ Offline Fallback Planner</span>`;
+            } else if (r && r.llm_provider) {
+                document.getElementById('activeModelLabel').innerHTML = `<span class="text-cyan-300">⚡ ${r.llm_provider.toUpperCase()} API</span>`;
             }
 
             // Update Short-Term Working Memory Section
