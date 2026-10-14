@@ -8,7 +8,17 @@ from agentecom.db.models import Product, Inventory
 from agentecom.db.seed import seed_database, SAMPLE_PRODUCTS
 from agentecom.core.cache import cache
 from agentecom.search.hybrid import hybrid_engine
+from agentecom.config import settings
 from agentecom.api.main import app
+
+@pytest.fixture(autouse=True)
+def force_testing_local_fallback(monkeypatch):
+    """
+    Ensures all automated test runs use the local deterministic fallback planner
+    so tests execute reliably and quickly without requiring an external Ollama daemon or API key.
+    """
+    monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "local")
+    monkeypatch.setattr(settings, "DEFAULT_LLM_PROVIDER", "local")
 
 @pytest_asyncio.fixture(scope="function")
 async def test_db_session():

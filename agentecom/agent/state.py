@@ -46,6 +46,8 @@ class AgentResponse(BaseModel):
     tracking_info: Optional[Dict[str, Any]] = None
     short_term_memory: Optional[Dict[str, Any]] = None
     fallback_active: bool = False
+    fallback_reason: Optional[str] = None
+    provider_used: Optional[str] = None
     security_flag: Optional[str] = None
     requires_human_approval: bool = False
     voice_mode: bool = False
@@ -69,10 +71,14 @@ class AgentState(TypedDict):
     requires_human_approval: bool
     voice_mode: bool
     readability: Optional[Dict[str, Any]]
-    provider: str  # "ollama", "groq", "local"
+    provider: str  # "groq", "gemini", "openrouter", "ollama", "local", "fallback"
     model_name: Optional[str]
     groq_api_key: Optional[str]
+    gemini_api_key: Optional[str]
+    openrouter_api_key: Optional[str]
     ollama_base_url: Optional[str]
+    fallback_cascade: Optional[str]
+    provider_used: Optional[str]
     fallback_active: Optional[bool]
     fallback_reason: Optional[str]
     start_time: float

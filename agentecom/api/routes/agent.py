@@ -10,11 +10,15 @@ class AgentChatRequest(BaseModel):
     message: str = Field(..., description="User prompt or agent command")
     session_id: Optional[str] = Field(None, description="Optional conversation session ID")
     user_id: Optional[str] = Field("default_shopper", description="User ID for long-term persona lookup")
-    llm_provider: Optional[str] = Field("groq", description="'groq', 'ollama', or 'local'")
-    llm_api_key: Optional[str] = Field(None, description="Optional Groq API Key")
-    model_name: Optional[str] = Field(None, description="Optional model name (e.g. 'llama-3.3-70b-versatile', 'llama3.2')")
+    llm_provider: Optional[str] = Field("groq", description="'groq', 'gemini', 'openrouter', 'ollama', or 'local'")
+    llm_api_key: Optional[str] = Field(None, description="Optional active provider API Key")
+    groq_api_key: Optional[str] = Field(None, description="Optional Groq API Key")
+    gemini_api_key: Optional[str] = Field(None, description="Optional Google Gemini API Key")
+    openrouter_api_key: Optional[str] = Field(None, description="Optional OpenRouter API Key")
+    model_name: Optional[str] = Field(None, description="Optional model name")
     ollama_base_url: Optional[str] = Field(None, description="Optional custom Ollama base URL")
     voice_mode: Optional[bool] = Field(False, description="Enable voice-optimized synthesis")
+    fallback_cascade: Optional[str] = Field(None, description="Optional custom cascade order (e.g. 'groq,gemini,openrouter')")
 
 class ResetSessionResponse(BaseModel):
     session_id: str
@@ -38,7 +42,11 @@ async def chat_with_agent(req: AgentChatRequest):
         model_name=req.model_name,
         ollama_base_url=req.ollama_base_url,
         user_id=req.user_id,
-        voice_mode=bool(req.voice_mode)
+        voice_mode=bool(req.voice_mode),
+        gemini_api_key=req.gemini_api_key,
+        openrouter_api_key=req.openrouter_api_key,
+        groq_api_key=req.groq_api_key,
+        fallback_cascade=req.fallback_cascade
     )
     return AgentResponse(**res_dict)
 

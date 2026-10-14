@@ -64,6 +64,17 @@ async def test_agent_api_endpoints(async_client: AsyncClient, test_db_session):
     assert data["readability"]["token_reduction_pct"] >= 0
     assert len(data["products"]) > 0
 
+    # Test POST /api/v1/agent/chat with ollama provider option
+    ollama_payload = {
+        "message": "what are the products there",
+        "session_id": session_id,
+        "llm_provider": "ollama",
+        "ollama_base_url": "http://localhost:11434"
+    }
+    ollama_res = await async_client.post("/api/v1/agent/chat", json=ollama_payload)
+    assert ollama_res.status_code == 200
+    assert "reply" in ollama_res.json()
+
     # Test GET /api/v1/agent/sessions/{session_id}
     sess_res = await async_client.get(f"/api/v1/agent/sessions/{session_id}")
     assert sess_res.status_code == 200
@@ -322,4 +333,134 @@ async def test_long_term_user_persona_memory(test_db_session):
     assert any(w in res["reply"].lower() for w in ["profile", "preference", "sizing", "flexispot", "m"])
 
 
+def test_get_llm_model_ollama_and_local_fallback():
+    """
+    Tests get_llm_model factory behavior for Ollama provider and local fallback.
+    """
+    from agentecom.agent.graph import get_llm_model
 
+    # 1. Local fallback should always return None
+    fallback_model = get_llm_model(provider="local")
+    assert fallback_model is None
+
+    # 2. Ollama provider should construct a ChatOllama instance
+    ollama_model = get_llm_model(provider="ollama", model_name="llama3.2", ollama_base_url="http://localhost:11434")
+    assert ollama_model is not None
+    m_name = getattr(ollama_model, "model", None) or getattr(ollama_model, "model_name", None)
+    assert m_name is not None and ("llama" in m_name.lower() or "mistral" in m_name.lower())
+
+
+def test_model_fallback_middleware_sequence():
+    """
+    Tests modelFallbackMiddleware ordering is strictly groq -> gemini -> openrouter.
+    """
+    from agentecom.agent.middleware import modelFallbackMiddleware
+
+    middleware = modelFallbackMiddleware(
+        primary_model="groq",
+        fallbackModels=["gemini", "openrouter"]
+    )
+    sequence = [name for _, name in middleware.get_full_sequence()]
+    assert sequence == ["groq", "gemini", "openrouter"]
+
+
+@pytest.mark.asyncio
+async def test_model_fallback_middleware_groq_to_gemini():
+    """
+    Tests fallback from Groq to Gemini when Groq encounters an error.
+    """
+    from agentecom.agent.middleware import ModelFallbackMiddleware
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.outputs import ChatResult, ChatGeneration
+    from langchain_core.messages import HumanMessage, AIMessage
+
+    class FailingGroq(BaseChatModel):
+        @property
+        def _llm_type(self): return "groq"
+        def _generate(self, messages, **kwargs): raise RuntimeError("Groq 429 Rate Limit Exceeded")
+        async def _agenerate(self, messages, **kwargs): raise RuntimeError("Groq 429 Rate Limit Exceeded")
+
+    class WorkingGemini(BaseChatModel):
+        @property
+        def _llm_type(self): return "gemini"
+        def _generate(self, messages, **kwargs):
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content="Gemini answer"))])
+        async def _agenerate(self, messages, **kwargs):
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content="Gemini answer"))])
+
+    middleware = ModelFallbackMiddleware(
+        primary_model=FailingGroq(),
+        fallback_models=[WorkingGemini(), "openrouter"]
+    )
+    result = await middleware.execute([HumanMessage(content="Hello")])
+    assert result["provider_used"] == "gemini"
+    assert result["fallback_active"] is True
+    assert "Groq 429 Rate Limit" in (result["fallback_reason"] or "")
+    assert result["response"].content == "Gemini answer"
+
+
+@pytest.mark.asyncio
+async def test_model_fallback_middleware_gemini_to_openrouter():
+    """
+    Tests fallback from Groq and Gemini to OpenRouter when both fail.
+    """
+    from agentecom.agent.middleware import ModelFallbackMiddleware
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.outputs import ChatResult, ChatGeneration
+    from langchain_core.messages import HumanMessage, AIMessage
+
+    class FailingGroq(BaseChatModel):
+        @property
+        def _llm_type(self): return "groq"
+        def _generate(self, messages, **kwargs): raise RuntimeError("Groq service outage")
+        async def _agenerate(self, messages, **kwargs): raise RuntimeError("Groq service outage")
+
+    class FailingGemini(BaseChatModel):
+        @property
+        def _llm_type(self): return "gemini"
+        def _generate(self, messages, **kwargs): raise RuntimeError("Gemini quota exceeded")
+        async def _agenerate(self, messages, **kwargs): raise RuntimeError("Gemini quota exceeded")
+
+    class WorkingOpenRouter(BaseChatModel):
+        @property
+        def _llm_type(self): return "openrouter"
+        def _generate(self, messages, **kwargs):
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content="OpenRouter answer"))])
+        async def _agenerate(self, messages, **kwargs):
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content="OpenRouter answer"))])
+
+    middleware = ModelFallbackMiddleware(
+        primary_model=FailingGroq(),
+        fallback_models=[FailingGemini(), WorkingOpenRouter()]
+    )
+    result = await middleware.execute([HumanMessage(content="Hello")])
+    assert result["provider_used"] == "openrouter"
+    assert result["fallback_active"] is True
+    assert "Gemini quota exceeded" in (result["fallback_reason"] or "")
+    assert result["response"].content == "OpenRouter answer"
+
+
+@pytest.mark.asyncio
+async def test_model_fallback_middleware_all_exhausted():
+    """
+    Tests that when all external models fail, middleware signals local fallback.
+    """
+    from agentecom.agent.middleware import ModelFallbackMiddleware
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.messages import HumanMessage
+
+    class Failing(BaseChatModel):
+        @property
+        def _llm_type(self): return "failing"
+        def _generate(self, messages, **kwargs): raise RuntimeError("Error")
+        async def _agenerate(self, messages, **kwargs): raise RuntimeError("Error")
+
+    middleware = ModelFallbackMiddleware(
+        primary_model=Failing(),
+        fallback_models=[Failing()]
+    )
+    result = await middleware.execute([HumanMessage(content="Hello")])
+    assert result["response"] is None
+    assert result["provider_used"] == "local"
+    assert result["fallback_active"] is True
+    assert "exhausted" in result["fallback_reason"].lower()

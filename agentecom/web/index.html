@@ -37,8 +37,11 @@
             <div class="flex items-center gap-1.5 bg-slate-800/90 px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
                 <span class="text-slate-400">Provider:</span>
                 <select id="providerSelect" onchange="handleProviderChange()" class="bg-slate-900 text-cyan-300 font-medium border-0 focus:outline-none cursor-pointer rounded px-1.5 py-0.5">
-                    <option value="groq" selected>⚡ Groq API (Llama 3.3)</option>
-                    <option value="local">⚡ Local Fallback (Zero-Key)</option>
+                    <option value="groq" selected>⚡ Groq -> Gemini -> OpenRouter (Cascade)</option>
+                    <option value="gemini">✨ Google Gemini</option>
+                    <option value="openrouter">🌐 OpenRouter</option>
+                    <option value="ollama">🦙 Ollama (Local LLM)</option>
+                    <option value="local">🛡️ Local Fallback (Zero-Key)</option>
                 </select>
             </div>
 
@@ -269,13 +272,28 @@
             
             <div class="space-y-3 text-xs">
                 <div>
-                    <label class="block font-medium text-slate-300 mb-1">Groq API Key (Optional)</label>
+                    <label class="block font-medium text-slate-300 mb-1">Groq API Key (Primary)</label>
                     <input type="password" id="groqApiKeyInput" placeholder="gsk_..." class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
-                    <p class="text-[10px] text-slate-500 mt-1">Used when Provider is set to '⚡ Groq API'. If left blank or unavailable, system automatically uses the Local Zero-Key Fallback Planner.</p>
+                    <p class="text-[10px] text-slate-500 mt-1">First in fallback sequence. Get free key from console.groq.com.</p>
                 </div>
                 <div>
-                    <label class="block font-medium text-slate-300 mb-1">Model Name</label>
-                    <input type="text" id="modelNameInput" placeholder="llama-3.3-70b-versatile" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                    <label class="block font-medium text-slate-300 mb-1">Google Gemini API Key (1st Fallback)</label>
+                    <input type="password" id="geminiApiKeyInput" placeholder="AIzaSy..." class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                    <p class="text-[10px] text-slate-500 mt-1">Second in fallback sequence. Get key from aistudio.google.com.</p>
+                </div>
+                <div>
+                    <label class="block font-medium text-slate-300 mb-1">OpenRouter API Key (2nd Fallback)</label>
+                    <input type="password" id="openrouterApiKeyInput" placeholder="sk-or-v1-..." class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                    <p class="text-[10px] text-slate-500 mt-1">Third in fallback sequence. Get key from openrouter.ai.</p>
+                </div>
+                <div>
+                    <label class="block font-medium text-slate-300 mb-1">Ollama Base URL (Optional)</label>
+                    <input type="text" id="ollamaUrlInput" placeholder="http://localhost:11434" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                    <p class="text-[10px] text-slate-500 mt-1">Used when Provider is set to '🦙 Ollama (Local LLM)'. Defaults to http://localhost:11434.</p>
+                </div>
+                <div>
+                    <label class="block font-medium text-slate-300 mb-1">Custom Model Name (Optional)</label>
+                    <input type="text" id="modelNameInput" placeholder="llama3.2, mistral, or llama-3.3-70b-versatile" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
                 </div>
             </div>
 
@@ -370,16 +388,46 @@
             }
         }
 
-        function toggleSettingsModal() {
-            document.getElementById('configModal').classList.toggle('hidden');
+        function syncStoredKeys() {
+            const gk = document.getElementById('groqApiKeyInput')?.value.trim() || '';
+            const gemk = document.getElementById('geminiApiKeyInput')?.value.trim() || '';
+            const ork = document.getElementById('openrouterApiKeyInput')?.value.trim() || '';
+            if (gk) localStorage.setItem('agentecom_groq_key', gk); else localStorage.removeItem('agentecom_groq_key');
+            if (gemk) localStorage.setItem('agentecom_gemini_key', gemk); else localStorage.removeItem('agentecom_gemini_key');
+            if (ork) localStorage.setItem('agentecom_openrouter_key', ork); else localStorage.removeItem('agentecom_openrouter_key');
         }
+
+        function toggleSettingsModal() {
+            const modal = document.getElementById('configModal');
+            modal.classList.toggle('hidden');
+            if (modal.classList.contains('hidden')) {
+                syncStoredKeys();
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const gk = localStorage.getItem('agentecom_groq_key');
+            const gemk = localStorage.getItem('agentecom_gemini_key');
+            const ork = localStorage.getItem('agentecom_openrouter_key');
+            const gInput = document.getElementById('groqApiKeyInput');
+            const gemInput = document.getElementById('geminiApiKeyInput');
+            const orInput = document.getElementById('openrouterApiKeyInput');
+            if (gk && gInput) gInput.value = gk;
+            if (gemk && gemInput) gemInput.value = gemk;
+            if (ork && orInput) orInput.value = ork;
+            gInput?.addEventListener('input', syncStoredKeys);
+            gemInput?.addEventListener('input', syncStoredKeys);
+            orInput?.addEventListener('input', syncStoredKeys);
+        });
 
         function handleProviderChange() {
             const val = document.getElementById('providerSelect').value;
             const labelMap = {
-                'local': 'Local Zero-Key',
+                'local': '🛡️ Local Zero-Key',
                 'ollama': '🦙 Ollama (Local)',
-                'groq': '⚡ Groq API'
+                'groq': '⚡ Groq -> Gemini -> OpenRouter',
+                'gemini': '✨ Google Gemini',
+                'openrouter': '🌐 OpenRouter'
             };
             document.getElementById('activeModelLabel').textContent = labelMap[val] || val;
         }
@@ -403,7 +451,9 @@
             sendBtn.innerHTML = 'Thinking...';
 
             const provider = document.getElementById('providerSelect').value;
-            const groqKey = document.getElementById('groqApiKeyInput').value.trim();
+            const groqKey = document.getElementById('groqApiKeyInput')?.value.trim() || localStorage.getItem('agentecom_groq_key') || '';
+            const geminiKey = document.getElementById('geminiApiKeyInput')?.value.trim() || localStorage.getItem('agentecom_gemini_key') || '';
+            const openrouterKey = document.getElementById('openrouterApiKeyInput')?.value.trim() || localStorage.getItem('agentecom_openrouter_key') || '';
             const ollamaUrl = document.getElementById('ollamaUrlInput').value.trim();
             const modelName = document.getElementById('modelNameInput').value.trim();
 
@@ -416,7 +466,10 @@
                         session_id: currentSessionId,
                         user_id: "default_shopper",
                         llm_provider: provider,
-                        llm_api_key: groqKey || undefined,
+                        llm_api_key: groqKey || geminiKey || openrouterKey || undefined,
+                        groq_api_key: groqKey || undefined,
+                        gemini_api_key: geminiKey || undefined,
+                        openrouter_api_key: openrouterKey || undefined,
                         model_name: modelName || undefined,
                         ollama_base_url: ollamaUrl || undefined,
                         voice_mode: isVoiceActive

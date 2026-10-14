@@ -3,6 +3,7 @@ Autonomous AI Shopping Agent Engine for AgentEcom.
 Orchestrated via LangGraph with Ollama and Groq support.
 """
 
+import os
 import time
 import json
 import uuid
@@ -11,6 +12,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 
 from agentecom.agent.state import AgentState, ReadabilityMetric
 from agentecom.agent.graph import commerce_langgraph_app
+from agentecom.config import settings, reload_settings
 
 class AgentMessage(Dict[str, Any]):
     pass
@@ -58,18 +60,39 @@ class AutonomousCommerceAgent:
         self,
         user_input: str,
         session_id: Optional[str] = None,
-        llm_provider: str = "groq",
+        llm_provider: Optional[str] = None,
         llm_api_key: Optional[str] = None,
         model_name: Optional[str] = None,
         ollama_base_url: Optional[str] = None,
         user_id: Optional[str] = None,
-        voice_mode: bool = False
+        voice_mode: bool = False,
+        gemini_api_key: Optional[str] = None,
+        openrouter_api_key: Optional[str] = None,
+        groq_api_key: Optional[str] = None,
+        fallback_cascade: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Processes a multi-turn user conversation step through the upgraded LangGraph workflow.
         """
         start_time = time.perf_counter()
         session = self.get_or_create_session(session_id)
+
+        active_provider = (llm_provider or getattr(settings, "DEFAULT_LLM_PROVIDER", "groq") or "groq").lower().strip()
+        if active_provider in ["gemini", "google", "google_gemini"]:
+            default_model = getattr(settings, "GEMINI_MODEL_NAME", "gemini-1.5-flash")
+        elif active_provider in ["openrouter", "open_router"]:
+            default_model = getattr(settings, "OPENROUTER_MODEL_NAME", "meta-llama/llama-3.3-70b-instruct")
+        elif active_provider in ["ollama", "local_ollama"]:
+            default_model = getattr(settings, "OLLAMA_MODEL_NAME", "llama3.2")
+        else:
+            default_model = getattr(settings, "GROQ_MODEL_NAME", "llama-3.3-70b-versatile")
+
+        active_model = model_name or default_model
+        active_ollama_url = ollama_base_url or getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
+        active_groq_key = groq_api_key or (llm_api_key if active_provider in ["groq", "cloud"] else None) or getattr(settings, "GROQ_API_KEY", None) or os.getenv("GROQ_API_KEY")
+        active_gemini_key = gemini_api_key or (llm_api_key if active_provider in ["gemini", "google"] else None) or getattr(settings, "GEMINI_API_KEY", None) or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        active_openrouter_key = openrouter_api_key or (llm_api_key if active_provider in ["openrouter", "open_router"] else None) or getattr(settings, "OPENROUTER_API_KEY", None) or os.getenv("OPENROUTER_API_KEY")
+        active_cascade = fallback_cascade or getattr(settings, "FALLBACK_CASCADE_ORDER", "groq,gemini,openrouter")
 
         # Reconstruct LangChain BaseMessage history
         history_messages: List[BaseMessage] = []
@@ -110,10 +133,14 @@ class AutonomousCommerceAgent:
             "requires_human_approval": False,
             "voice_mode": voice_mode,
             "readability": None,
-            "provider": llm_provider or "groq",
-            "model_name": model_name,
-            "groq_api_key": llm_api_key,
-            "ollama_base_url": ollama_base_url,
+            "provider": active_provider,
+            "model_name": active_model,
+            "groq_api_key": active_groq_key,
+            "gemini_api_key": active_gemini_key,
+            "openrouter_api_key": active_openrouter_key,
+            "ollama_base_url": active_ollama_url,
+            "fallback_cascade": active_cascade,
+            "provider_used": None,
             "fallback_active": False,
             "fallback_reason": None,
             "start_time": start_time
@@ -122,12 +149,12 @@ class AutonomousCommerceAgent:
         # Configure LangSmith & LangGraph execution run metadata
         run_config = {
             "run_name": f"commerce_turn_{session['session_id'][:8]}",
-            "tags": ["AgentEcom", llm_provider, model_name or "default"],
+            "tags": ["AgentEcom", active_provider, active_model or "default"],
             "metadata": {
                 "session_id": session["session_id"],
                 "user_id": u_id,
-                "llm_provider": llm_provider,
-                "model_name": model_name,
+                "llm_provider": active_provider,
+                "model_name": active_model,
                 "cart_items_count": len(session.get("cart", [])),
                 "has_active_order": bool(session.get("order")),
                 "has_active_product": bool((session.get("short_term_memory") or {}).get("active_product"))
@@ -166,6 +193,8 @@ class AutonomousCommerceAgent:
             "tracking_info": session["tracking_info"],
             "short_term_memory": session["short_term_memory"],
             "fallback_active": bool(result_state.get("fallback_active", False)),
+            "fallback_reason": result_state.get("fallback_reason"),
+            "provider_used": result_state.get("provider_used") or (result_state.get("readability") or {}).get("llm_provider"),
             "security_flag": result_state.get("security_flag"),
             "requires_human_approval": bool(result_state.get("requires_human_approval", False)),
             "voice_mode": voice_mode,

@@ -51,6 +51,13 @@ from agentecom.tools.commerce import (
     tool_update_user_profile
 )
 from agentecom.core.cache import cache
+from agentecom.config import settings
+from agentecom.agent.providers import (
+    invoke_chat_model_with_fallback,
+    create_chat_model,
+    get_candidate_cascade_order
+)
+from agentecom.agent.middleware import modelFallbackMiddleware, ModelFallbackMiddleware
 
 SYSTEM_PROMPT = """You are a warm, knowledgeable, proactive, and friendly Autonomous AI Shopping Assistant for AgentEcom.
 You have access to fast, idempotent commerce and post-purchase self-service tools:
@@ -146,22 +153,64 @@ def extract_json_tool_calls(content: str) -> List[Dict[str, Any]]:
     return tool_calls
 
 
-def get_llm_model(provider: str = "groq", model_name: Optional[str] = None, groq_api_key: Optional[str] = None, ollama_base_url: Optional[str] = None):
+def resolve_ollama_model(preferred_model: Optional[str], base_url: str) -> str:
     """
-    Factory to return configured LangChain ChatModel (Groq) or None for deterministic local fallback planner.
+    Checks if preferred_model is installed in Ollama; if not, falls back to an available installed model.
     """
-    groq_key = groq_api_key or os.getenv("GROQ_API_KEY")
+    target = preferred_model or getattr(settings, "OLLAMA_MODEL_NAME", "llama3.2")
+    try:
+        import urllib.request
+        clean_url = base_url.rstrip("/")
+        req = urllib.request.Request(f"{clean_url}/api/tags", headers={"User-Agent": "AgentEcom"})
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            data = json.loads(resp.read().decode())
+            installed_full = [m.get("name", "") for m in data.get("models", [])]
+            installed_short = [m.split(":")[0] for m in installed_full]
 
-    if (provider == "groq" or provider == "cloud") and groq_key:
-        try:
-            from langchain_groq import ChatGroq
-            m_name = model_name or "llama-3.3-70b-versatile"
-            return ChatGroq(model_name=m_name, api_key=groq_key, temperature=0.2)
-        except Exception:
-            pass
+            # 1. Check for exact or prefix match with target
+            for name in installed_full:
+                if name == target or name.startswith(f"{target}:"):
+                    return name
+            for name in installed_short:
+                if name == target:
+                    return target
 
-    # All other cases (provider="local", provider="fallback", missing key) route directly to local fallback planner
-    return None
+            # 2. Check for installed tool-capable models in priority order
+            for candidate in ["llama3.2", "llama3.1", "mistral", "qwen2.5", "llama3"]:
+                for full_name in installed_full:
+                    if candidate in full_name.lower():
+                        return full_name
+
+            # 3. If any model is installed, use the first one
+            if installed_full:
+                return installed_full[0]
+    except Exception:
+        pass
+    return target
+
+
+def get_llm_model(
+    provider: str = "groq",
+    model_name: Optional[str] = None,
+    groq_api_key: Optional[str] = None,
+    ollama_base_url: Optional[str] = None,
+    gemini_api_key: Optional[str] = None,
+    openrouter_api_key: Optional[str] = None,
+    **kwargs: Any
+):
+    """
+    Factory to return configured LangChain ChatModel (Groq, Gemini, OpenRouter, Ollama)
+    or None for deterministic local fallback planner.
+    """
+    from agentecom.agent.providers import create_chat_model
+    return create_chat_model(
+        provider=provider,
+        model_name=model_name,
+        openrouter_api_key=openrouter_api_key,
+        gemini_api_key=gemini_api_key,
+        groq_api_key=groq_api_key,
+        ollama_base_url=ollama_base_url
+    )
 
 
 async def input_guardrail_node(state: AgentState) -> Dict[str, Any]:
@@ -242,7 +291,10 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
     provider = state.get("provider", "groq")
     model_name = state.get("model_name")
     groq_api_key = state.get("groq_api_key")
+    gemini_api_key = state.get("gemini_api_key")
+    openrouter_api_key = state.get("openrouter_api_key")
     ollama_base_url = state.get("ollama_base_url")
+    fallback_cascade = state.get("fallback_cascade")
 
     # Short-term memory context extraction
     short_term_memory = dict(state.get("short_term_memory") or {})
@@ -257,8 +309,6 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
     if not active_prod and retrieved_prods:
         active_prod = retrieved_prods[0]
 
-    llm = get_llm_model(provider, model_name, groq_api_key, ollama_base_url)
-
     # Extract latest human message
     last_msg = ""
     for m in reversed(state["messages"]):
@@ -269,100 +319,113 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
         last_msg = state["messages"][-1].content
     low = last_msg.lower().strip()
 
-    if llm is not None:
-        try:
-            llm_with_tools = llm.bind_tools(COMMERCE_TOOLS)
-            
-            # Augment system prompt with live short-term working memory containing full entity attributes
-            memory_lines = []
+    # Augment system prompt with live short-term working memory containing full entity attributes
+    memory_lines = []
 
-            # 1. Active Order Context & Attributes
-            if active_order:
-                items_desc = []
-                for it in active_order.get("items", []):
-                    u_price = it.get("unit_price") or it.get("price") or (it.get("item_total", 0) / it.get("quantity", 1) if it.get("quantity") else 0)
-                    items_desc.append(f"{it.get('name', it.get('sku'))} (SKU: {it.get('sku')}, Qty: {it.get('quantity', 1)}, Unit Price: ${u_price:.2f})")
-                items_str = "; ".join(items_desc) if items_desc else "None"
-                memory_lines.append(
-                    f"- ACTIVE / RETRIEVED ORDER ENTITY:\n"
-                    f"  * Order Number: {active_order.get('order_number')}\n"
-                    f"  * Purchase Date / Placed At: {active_order.get('created_at', 'N/A')}\n"
-                    f"  * Order Status: {active_order.get('status')}\n"
-                    f"  * Total Amount Paid: ${active_order.get('total_amount', 0):.2f}\n"
-                    f"  * Idempotency Key: {active_order.get('idempotency_key', 'N/A')}\n"
-                    f"  * Customer Email: {active_order.get('customer_email', 'N/A')}\n"
-                    f"  * Purchased Items: {items_str}"
-                )
+    # 1. Active Order Context & Attributes
+    if active_order:
+        items_desc = []
+        for it in active_order.get("items", []):
+            u_price = it.get("unit_price") or it.get("price") or (it.get("item_total", 0) / it.get("quantity", 1) if it.get("quantity") else 0)
+            items_desc.append(f"{it.get('name', it.get('sku'))} (SKU: {it.get('sku')}, Qty: {it.get('quantity', 1)}, Unit Price: ${u_price:.2f})")
+        items_str = "; ".join(items_desc) if items_desc else "None"
+        memory_lines.append(
+            f"- ACTIVE / RETRIEVED ORDER ENTITY:\n"
+            f"  * Order Number: {active_order.get('order_number')}\n"
+            f"  * Purchase Date / Placed At: {active_order.get('created_at', 'N/A')}\n"
+            f"  * Order Status: {active_order.get('status')}\n"
+            f"  * Total Amount Paid: ${active_order.get('total_amount', 0):.2f}\n"
+            f"  * Idempotency Key: {active_order.get('idempotency_key', 'N/A')}\n"
+            f"  * Customer Email: {active_order.get('customer_email', 'N/A')}\n"
+            f"  * Purchased Items: {items_str}"
+        )
 
-            # 2. Active Product Context & Attributes
-            if active_prod:
-                attrs_dict = active_prod.get("attributes", {})
-                attrs_formatted = ", ".join([f"{k}: {v}" for k, v in attrs_dict.items()]) if attrs_dict else "None specified"
-                memory_lines.append(
-                    f"- ACTIVE / RETRIEVED PRODUCT ENTITY & ATTRIBUTES:\n"
-                    f"  * Product Name: {active_prod.get('name')}\n"
-                    f"  * SKU: {active_prod.get('sku')}\n"
-                    f"  * Price: ${active_prod.get('price', 0):.2f}\n"
-                    f"  * Category: {active_prod.get('category', 'N/A')}\n"
-                    f"  * Stock Count / Availability: {active_prod.get('stock_count', 'In stock')}\n"
-                    f"  * Description: {active_prod.get('description', '')[:250]}\n"
-                    f"  * Specifications & Attributes: {attrs_formatted}"
-                )
+    # 2. Active Product Context & Attributes
+    if active_prod:
+        attrs_dict = active_prod.get("attributes", {})
+        attrs_formatted = ", ".join([f"{k}: {v}" for k, v in attrs_dict.items()]) if attrs_dict else "None specified"
+        memory_lines.append(
+            f"- ACTIVE / RETRIEVED PRODUCT ENTITY & ATTRIBUTES:\n"
+            f"  * Product Name: {active_prod.get('name')}\n"
+            f"  * SKU: {active_prod.get('sku')}\n"
+            f"  * Price: ${active_prod.get('price', 0):.2f}\n"
+            f"  * Category: {active_prod.get('category', 'N/A')}\n"
+            f"  * Stock Count / Availability: {active_prod.get('stock_count', 'In stock')}\n"
+            f"  * Description: {active_prod.get('description', '')[:250]}\n"
+            f"  * Specifications & Attributes: {attrs_formatted}"
+        )
 
-            # 3. Cart & Checkout Session
-            if state.get("cart"):
-                cart_items_str = ", ".join([f"{i['sku']} (qty {i['quantity']})" for i in state["cart"]])
-                memory_lines.append(f"- Current Cart Items: {cart_items_str}")
-            if state.get("checkout_session"):
-                cs = state["checkout_session"]
-                memory_lines.append(f"- Active Checkout Session: ID `{cs.get('session_id')}`, Total: ${cs.get('total_amount', 0):.2f}, Status: {cs.get('status')}")
+    # 3. Cart & Checkout Session
+    if state.get("cart"):
+        cart_items_str = ", ".join([f"{i['sku']} (qty {i['quantity']})" for i in state["cart"]])
+        memory_lines.append(f"- Current Cart Items: {cart_items_str}")
+    if state.get("checkout_session"):
+        cs = state["checkout_session"]
+        memory_lines.append(f"- Active Checkout Session: ID `{cs.get('session_id')}`, Total: ${cs.get('total_amount', 0):.2f}, Status: {cs.get('status')}")
 
-            if recent_skus:
-                memory_lines.append(f"- Recently referenced SKUs: {', '.join(recent_skus[:5])}")
-            if recent_queries:
-                memory_lines.append(f"- Recent search topics: {', '.join(recent_queries[-3:])}")
+    if recent_skus:
+        memory_lines.append(f"- Recently referenced SKUs: {', '.join(recent_skus[:5])}")
+    if recent_queries:
+        memory_lines.append(f"- Recent search topics: {', '.join(recent_queries[-3:])}")
 
-            dynamic_prompt = SYSTEM_PROMPT
-            if memory_lines:
-                dynamic_prompt += "\n\n[CONVERSATIONAL SHORT-TERM WORKING MEMORY WITH ENTITY ATTRIBUTES]\n" + "\n".join(memory_lines) + "\n*Rule: When the user asks about attributes, dates, status, or details of recently placed/retrieved orders, answer directly from order working memory or call get_order_history without calling search_products.*"
+    dynamic_prompt = SYSTEM_PROMPT
+    if memory_lines:
+        dynamic_prompt += "\n\n[CONVERSATIONAL SHORT-TERM WORKING MEMORY WITH ENTITY ATTRIBUTES]\n" + "\n".join(memory_lines) + "\n*Rule: When the user asks about attributes, dates, status, or details of recently placed/retrieved orders, answer directly from order working memory or call get_order_history without calling search_products.*"
 
-            messages = [SystemMessage(content=dynamic_prompt)] + list(state["messages"])
-            response = await llm_with_tools.ainvoke(messages)
-            
-            # Check native tool calls
-            if getattr(response, "tool_calls", None):
-                return {"messages": [response], "fallback_active": False, "fallback_reason": None}
-            
-            # Check extracted JSON tool calls in text content
-            extracted_calls = extract_json_tool_calls(getattr(response, "content", ""))
-            if extracted_calls:
-                return {"messages": [AIMessage(content="", tool_calls=extracted_calls)], "fallback_active": False, "fallback_reason": None}
+    messages = [SystemMessage(content=dynamic_prompt)] + list(state["messages"])
 
-            # If we just executed a tool, LLM synthesized response is complete
-            last_is_tool = isinstance(state["messages"][-1], ToolMessage) or (hasattr(state["messages"][-1], "tool_call_id") and getattr(state["messages"][-1], "tool_call_id", None))
-            if last_is_tool:
-                tool_content = state["messages"][-1].content
-                if response.content and any(w in response.content.lower() for w in ["order", "purchase", "product", "item", "cart", "checkout", "stock", "found", "total", "session", "placed", "confirmed", "price"]):
-                    return {"messages": [response], "fallback_active": False, "fallback_reason": None}
-                return {"messages": [AIMessage(content=tool_content)], "fallback_active": False, "fallback_reason": None}
+    # Multi-Model Fallback Middleware Execution (groq -> gemini -> openrouter)
+    fallback_middleware = modelFallbackMiddleware(
+        fallbackModels=fallback_cascade or ["gemini", "openrouter"],
+        primary_model=provider if provider not in ["fallback", "auto", "cascade"] else "groq",
+        groq_api_key=groq_api_key,
+        gemini_api_key=gemini_api_key,
+        openrouter_api_key=openrouter_api_key,
+        ollama_base_url=ollama_base_url,
+        model_name=model_name
+    )
+    cascade_result = await fallback_middleware.execute(
+        messages=messages,
+        tools=COMMERCE_TOOLS
+    )
+    response = cascade_result.get("response")
+    active_prov = cascade_result.get("provider_used") or "local"
+    is_fallback = cascade_result.get("fallback_active", False)
+    fb_reason = cascade_result.get("fallback_reason")
 
-            # Detect if user requested an actionable commerce action
-            sku_match = re.search(r'\b([A-Z0-9]{3,8}-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
-            order_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
-            commerce_action_detected = bool(
-                re.search(r'\b(find|search|show|browse|details?|specs?|order|orders|purchase|cart|checkout|confirm|stock|stocks|under|below|less\s+than|buy|pay|what\s+are|catalog)\b', low)
-                or sku_match or order_match
-            )
-            # If purely conversational with no commerce action, return the LLM response
-            if not commerce_action_detected and response.content:
-                return {"messages": [response], "fallback_active": False, "fallback_reason": None}
-        except Exception:
-            pass
+    if response is not None:
+        # Check native tool calls
+        if getattr(response, "tool_calls", None):
+            return {"messages": [response], "fallback_active": is_fallback, "fallback_reason": fb_reason, "provider_used": active_prov}
+
+        # Check extracted JSON tool calls in text content
+        extracted_calls = extract_json_tool_calls(getattr(response, "content", ""))
+        if extracted_calls:
+            return {"messages": [AIMessage(content="", tool_calls=extracted_calls)], "fallback_active": is_fallback, "fallback_reason": fb_reason, "provider_used": active_prov}
+
+        # If we just executed a tool, LLM synthesized response is complete
+        last_is_tool = isinstance(state["messages"][-1], ToolMessage) or (hasattr(state["messages"][-1], "tool_call_id") and getattr(state["messages"][-1], "tool_call_id", None))
+        if last_is_tool:
+            tool_content = state["messages"][-1].content
+            if response.content and any(w in response.content.lower() for w in ["order", "purchase", "product", "item", "cart", "checkout", "stock", "found", "total", "session", "placed", "confirmed", "price"]):
+                return {"messages": [response], "fallback_active": is_fallback, "fallback_reason": fb_reason, "provider_used": active_prov}
+            return {"messages": [AIMessage(content=tool_content)], "fallback_active": is_fallback, "fallback_reason": fb_reason, "provider_used": active_prov}
+
+        # Detect if user requested an actionable commerce action
+        sku_match = re.search(r'\b([A-Z0-9]{3,8}-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
+        order_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', last_msg, re.IGNORECASE)
+        commerce_action_detected = bool(
+            re.search(r'\b(find|search|show|browse|details?|specs?|order|orders|purchase|cart|checkout|confirm|stock|stocks|under|below|less\s+than|buy|pay|what\s+are|catalog)\b', low)
+            or sku_match or order_match
+        )
+        # If purely conversational with no commerce action, return the LLM response
+        if not commerce_action_detected and response.content:
+            return {"messages": [response], "fallback_active": is_fallback, "fallback_reason": fb_reason, "provider_used": active_prov}
 
     # If the last message was a tool execution result and LLM is unavailable, return synthesized ToolMessage content
     last_is_tool = isinstance(state["messages"][-1], ToolMessage) or (hasattr(state["messages"][-1], "tool_call_id") and getattr(state["messages"][-1], "tool_call_id", None))
     if last_is_tool:
-        return {"messages": [AIMessage(content=state["messages"][-1].content)], "fallback_active": True, "fallback_reason": "LLM offline/unavailable; used tool synthesis fallback"}
+        return {"messages": [AIMessage(content=state["messages"][-1].content)], "fallback_active": True, "fallback_reason": fb_reason or "LLM offline/unavailable; used tool synthesis fallback", "provider_used": "local"}
 
     # Deterministic Local Tool Planner & Intent Router (Zero-Key / Offline Fallback)
     tool_calls = []
