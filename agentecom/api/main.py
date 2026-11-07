@@ -89,3 +89,8 @@ async def health_check():
             "rpc_endpoint": "/mcp/rpc"
         }
     }
+
+if __name__ == '__main__':
+    import uvicorn
+    port = int(os.getenv('PORT', 8000))
+    uvicorn.run('agentecom.api.main:app', host='0.0.0.0', port=port, reload=False)
