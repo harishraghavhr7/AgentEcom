@@ -1,0 +1,40 @@
+# Virtual Environments
+.venv/
+venv/
+env/
+__pypackages__/
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Testing & Linting
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Version Control & IDEs
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Local databases & logs (use container volumes instead)
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# Sensitive secrets & environment files
+.env
+*.pem
+*.key
+
+# Temporary files
+scratch/
+tmp/
+*.tmp

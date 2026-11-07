@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AgentEcom — LangGraph Autonomous AI Commerce Agent</title>
+    <title>AgentEcom — FastMCP & LangGraph Autonomous Commerce Engine</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -14,22 +14,40 @@
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        .glass-panel { background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(51, 65, 85, 0.6); }
+        .tab-btn.active { background: #06b6d4; color: #ffffff; }
     </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased">
 
     <!-- Header Navigation -->
     <header class="border-b border-slate-800 bg-slate-900/90 sticky top-0 z-50 backdrop-blur-md px-6 py-3 flex items-center justify-between">
-        <div class="flex items-center space-x-3">
-            <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 font-bold text-white text-lg">
-                🦜
+        <div class="flex items-center space-x-4">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 font-bold text-white text-xl">
+                ⚡
             </div>
             <div>
                 <h1 class="font-bold text-base text-white tracking-tight flex items-center gap-2">
-                    AgentEcom <span class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-medium border border-indigo-500/30">LangGraph Agent</span>
+                    AgentEcom <span class="text-[11px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-medium border border-cyan-500/30">FastMCP + LangGraph</span>
                 </h1>
-                <p class="text-[11px] text-slate-400">LangChain & LangGraph with Ollama / Groq Switching</p>
+                <p class="text-[11px] text-slate-400">4-Pillar Autonomous Commerce Architecture</p>
             </div>
+        </div>
+
+        <!-- Center View Mode Tabs -->
+        <div class="flex items-center bg-slate-800/90 p-1 rounded-xl border border-slate-700 text-xs">
+            <button onclick="switchView('storefront')" id="tabBtnStorefront" class="tab-btn active px-3.5 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5">
+                <span>🛍️</span> Storefront & Chat
+            </button>
+            <button onclick="switchView('merchant')" id="tabBtnMerchant" class="tab-btn text-slate-400 hover:text-white px-3.5 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5">
+                <span>🏬</span> Retail Store Manager
+            </button>
+            <button onclick="switchView('mcp')" id="tabBtnMcp" class="tab-btn text-slate-400 hover:text-white px-3.5 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5">
+                <span>🔌</span> FastMCP Gateway
+            </button>
+            <button onclick="switchView('topology')" id="tabBtnTopology" class="tab-btn text-slate-400 hover:text-white px-3.5 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5">
+                <span>🏛️</span> Architecture Topology
+            </button>
         </div>
 
         <div class="flex items-center space-x-3">
@@ -37,11 +55,11 @@
             <div class="flex items-center gap-1.5 bg-slate-800/90 px-3 py-1.5 rounded-lg border border-slate-700 text-xs">
                 <span class="text-slate-400">Provider:</span>
                 <select id="providerSelect" onchange="handleProviderChange()" class="bg-slate-900 text-cyan-300 font-medium border-0 focus:outline-none cursor-pointer rounded px-1.5 py-0.5">
-                    <option value="groq" selected>⚡ Groq -> Gemini -> OpenRouter (Cascade)</option>
+                    <option value="groq" selected>⚡ Groq -> Gemini -> OpenRouter</option>
                     <option value="gemini">✨ Google Gemini</option>
                     <option value="openrouter">🌐 OpenRouter</option>
                     <option value="ollama">🦙 Ollama (Local LLM)</option>
-                    <option value="local">🛡️ Local Fallback (Zero-Key)</option>
+                    <option value="local">🛡️ Local Deterministic (Zero-Key)</option>
                 </select>
             </div>
 
@@ -60,204 +78,580 @@
     <!-- Main Workspace -->
     <div class="flex-1 flex overflow-hidden">
         
-        <!-- Left: Conversational Shopping Interface -->
-        <div class="flex-1 flex flex-col h-[calc(100vh-60px)] bg-slate-900 border-r border-slate-800">
-            
-            <!-- Chat Messages Thread -->
-            <div id="chatThread" class="flex-1 overflow-y-auto p-6 space-y-6">
-                <!-- Welcome Assistant Message -->
-                <div class="flex items-start gap-3">
-                    <div class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow">
-                        🦜
-                    </div>
-                    <div class="max-w-[85%] bg-slate-800/90 border border-slate-700 rounded-2xl rounded-tl-none p-4 text-slate-200 text-sm shadow-md space-y-2">
-                        <p class="font-semibold text-white">Hello! I am your Autonomous Commerce AI Agent built with <strong>LangGraph</strong>.</p>
-                        <p class="text-slate-300">I execute multi-step shopping workflows using <strong>Hybrid Search (BM25 + Dense RRF)</strong>, <strong>Aggressive In-Memory Caching (<0.1ms)</strong>, and <strong>Idempotent Isolated Checkout Sessions</strong>.</p>
-                        <div class="pt-2 flex flex-wrap gap-2 text-xs">
-                            <span class="text-slate-400 self-center">Try asking:</span>
-                            <button onclick="sendQuickPrompt('Find a cozy knit sweater under $60')" class="bg-slate-700/80 hover:bg-cyan-600/30 hover:text-cyan-300 text-slate-300 px-2.5 py-1 rounded-md border border-slate-600 transition">
-                                🧥 Cozy sweater under $60
-                            </button>
-                            <button onclick="sendQuickPrompt('Show me Sony noise canceling headphones')" class="bg-slate-700/80 hover:bg-cyan-600/30 hover:text-cyan-300 text-slate-300 px-2.5 py-1 rounded-md border border-slate-600 transition">
-                                🎧 Noise canceling headphones
-                            </button>
-                            <button onclick="sendQuickPrompt('Details for SKU-4471')" class="bg-slate-700/80 hover:bg-cyan-600/30 hover:text-cyan-300 text-slate-300 px-2.5 py-1 rounded-md border border-slate-600 transition">
-                                🏷️ Lookup SKU-4471
-                            </button>
+        <!-- =============================================================== -->
+        <!-- VIEW 1: Storefront & Conversational Chat Interface               -->
+        <!-- =============================================================== -->
+        <div id="viewStorefront" class="flex-1 flex overflow-hidden">
+            <!-- Left: Conversational Shopping Interface -->
+            <div class="flex-1 flex flex-col h-[calc(100vh-60px)] bg-slate-900 border-r border-slate-800">
+                
+                <!-- Chat Messages Thread -->
+                <div id="chatThread" class="flex-1 overflow-y-auto p-6 space-y-6">
+                    <!-- Welcome Assistant Message -->
+                    <div class="flex items-start gap-3">
+                        <div class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow">
+                            ⚡
+                        </div>
+                        <div class="max-w-[85%] bg-slate-800/90 border border-slate-700 rounded-2xl rounded-tl-none p-4 text-slate-200 text-sm shadow-md space-y-2">
+                            <p class="font-semibold text-white">Hello! I am your Autonomous Commerce AI Agent powered by <strong>FastMCP</strong> and <strong>LangGraph</strong>.</p>
+                            <p class="text-slate-300">All tools, prompts, and database queries are governed by our high-performance <strong>FastMCP Server</strong> gateway with sub-millisecond in-memory caching and isolated checkout sessions.</p>
+                            <div class="pt-2 flex flex-wrap gap-2 text-xs">
+                                <span class="text-slate-400 self-center">Try asking:</span>
+                                <button onclick="sendQuickPrompt('Find a cozy knit sweater under $60')" class="bg-slate-700/80 hover:bg-cyan-600/30 hover:text-cyan-300 text-slate-300 px-2.5 py-1 rounded-md border border-slate-600 transition">
+                                    🧥 Cozy sweater under $60
+                                </button>
+                                <button onclick="sendQuickPrompt('Show me Sony noise canceling headphones')" class="bg-slate-700/80 hover:bg-cyan-600/30 hover:text-cyan-300 text-slate-300 px-2.5 py-1 rounded-md border border-slate-600 transition">
+                                    🎧 Sony headphones
+                                </button>
+                                <button onclick="sendQuickPrompt('Details for SKU-4471')" class="bg-slate-700/80 hover:bg-cyan-600/30 hover:text-cyan-300 text-slate-300 px-2.5 py-1 rounded-md border border-slate-600 transition">
+                                    🏷️ Lookup SKU-4471
+                                </button>
+                                <button onclick="sendQuickPrompt('What are store return policies?')" class="bg-slate-700/80 hover:bg-cyan-600/30 hover:text-cyan-300 text-slate-300 px-2.5 py-1 rounded-md border border-slate-600 transition">
+                                    📜 Return Policy
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
+
+                <!-- Suggestion Badges -->
+                <div class="px-6 py-2 bg-slate-900/60 border-t border-slate-800 flex items-center gap-2 overflow-x-auto text-xs">
+                    <span class="text-slate-500 whitespace-nowrap">Agent Shortcuts:</span>
+                    <button onclick="sendQuickPrompt('Find high-end ergonomic desk chair')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
+                        🪑 Ergonomic Chair
+                    </button>
+                    <button onclick="sendQuickPrompt('electric gooseneck kettle')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
+                        ☕ Gooseneck Kettle
+                    </button>
+                    <button onclick="sendQuickPrompt('Check inventory stock for SKU-4471 and SKU-1002')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
+                        📦 Check Stock
+                    </button>
+                    <button onclick="sendQuickPrompt('Track my shipment for ORD-8812')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
+                        🚚 Track Package
+                    </button>
+                </div>
+
+                <!-- Input Composer -->
+                <div class="p-4 bg-slate-900 border-t border-slate-800">
+                    <form id="chatForm" onsubmit="handleChatSubmit(event)" class="relative flex items-center">
+                        <input 
+                            type="text" 
+                            id="chatInput" 
+                            placeholder="Ask for products, check stock, add to cart, or track orders..." 
+                            class="w-full bg-slate-950 border border-slate-700 rounded-xl pl-4 pr-28 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition shadow-inner"
+                        />
+                        <div class="absolute right-2 flex items-center gap-1.5">
+                            <button 
+                                type="submit" 
+                                id="sendBtn" 
+                                class="bg-cyan-600 hover:bg-cyan-500 text-white font-medium px-4 py-1.5 rounded-lg text-xs transition flex items-center gap-1.5 shadow"
+                            >
+                                <span>Send</span>
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                            </button>
+                        </div>
+                    </form>
+                </div>
             </div>
 
-            <!-- Suggestion Badges -->
-            <div class="px-6 py-2 bg-slate-900/60 border-t border-slate-800 flex items-center gap-2 overflow-x-auto text-xs">
-                <span class="text-slate-500 whitespace-nowrap">Agent Actions:</span>
-                <button onclick="sendQuickPrompt('Find high-end ergonomic desk chair')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
-                    🪑 Ergonomic Chair
-                </button>
-                <button onclick="sendQuickPrompt('electric gooseneck kettle')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
-                    ☕ Gooseneck Kettle
-                </button>
-                <button onclick="sendQuickPrompt('track my package')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
-                    📦 Track Shipment
-                </button>
-                <button onclick="sendQuickPrompt('return my order')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
-                    🔄 Return / RMA
-                </button>
-                <button onclick="sendQuickPrompt('cancel my order')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
-                    🛑 Cancel Order
-                </button>
-                <button onclick="sendQuickPrompt('view cart')" class="whitespace-nowrap bg-slate-800 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700 transition">
-                    🛒 View Cart
-                </button>
-                <button onclick="sendQuickPrompt('checkout')" class="whitespace-nowrap bg-slate-800 hover:bg-cyan-900/40 text-cyan-300 px-2.5 py-1 rounded-full border border-cyan-700/50 transition">
-                    💳 Checkout
-                </button>
-            </div>
+            <!-- Right: FastMCP & LangGraph Telemetry Inspector -->
+            <div class="w-96 flex flex-col h-[calc(100vh-60px)] bg-slate-950 border-slate-800 overflow-y-auto p-5 space-y-6">
+                
+                <!-- FastMCP Status Banner -->
+                <div class="bg-gradient-to-r from-cyan-950/60 to-indigo-950/60 border border-cyan-800/40 rounded-xl p-3.5 space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-semibold text-cyan-300 flex items-center gap-1.5">
+                            <span class="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+                            FastMCP Gateway Active
+                        </span>
+                        <span class="text-[10px] bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded font-mono border border-cyan-500/30">MCP 2024-11-05</span>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-center text-xs pt-1">
+                        <div class="bg-slate-900/80 p-1.5 rounded-lg border border-slate-800">
+                            <p class="text-[10px] text-slate-400">Tools</p>
+                            <p id="mcpToolsCount" class="font-bold text-white">13</p>
+                        </div>
+                        <div class="bg-slate-900/80 p-1.5 rounded-lg border border-slate-800">
+                            <p class="text-[10px] text-slate-400">Prompts</p>
+                            <p id="mcpPromptsCount" class="font-bold text-white">5</p>
+                        </div>
+                        <div class="bg-slate-900/80 p-1.5 rounded-lg border border-slate-800">
+                            <p class="text-[10px] text-slate-400">Resources</p>
+                            <p id="mcpResourcesCount" class="font-bold text-white">5</p>
+                        </div>
+                    </div>
+                </div>
 
-            <!-- Input Area with Voice Shopping -->
-            <div class="p-4 bg-slate-900 border-t border-slate-800">
-                <form id="chatForm" onsubmit="handleChatSubmit(event)" class="flex gap-2">
-                    <input 
-                        type="text" 
-                        id="chatInput" 
-                        placeholder="Search products, check stock, speak by voice, track orders, or checkout..."
-                        class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition shadow-inner"
-                        autocomplete="off"
-                    />
-                    <!-- Voice Shopping Mic Button -->
-                    <button 
-                        type="button" 
-                        id="voiceBtn" 
-                        onclick="toggleVoiceShopping()" 
-                        class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-cyan-500 font-medium px-3.5 py-3 rounded-xl text-sm transition flex items-center gap-1.5 shadow"
-                        title="Voice Shopping (Hands-Free Dictation)"
-                    >
-                        <span id="voiceIcon">🎙️</span>
-                        <span id="voiceLabel" class="hidden sm:inline text-xs font-semibold">Voice</span>
-                    </button>
+                <!-- Telemetry Metrics Cards -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
+                        <p class="text-[10px] font-medium text-slate-400">Execution Latency</p>
+                        <p id="metricLatency" class="text-lg font-bold text-emerald-400 mt-0.5">0.0 ms</p>
+                        <span class="text-[9px] text-slate-500">Sub-millisecond ready</span>
+                    </div>
+                    <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
+                        <p class="text-[10px] font-medium text-slate-400">Token Reduction</p>
+                        <p id="metricTokenReduction" class="text-lg font-bold text-cyan-400 mt-0.5">0.0%</p>
+                        <span class="text-[9px] text-slate-500">MCP tool compression</span>
+                    </div>
+                    <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
+                        <p class="text-[10px] font-medium text-slate-400">Est. Raw Tokens</p>
+                        <p id="metricRawTokens" class="text-base font-semibold text-slate-300 mt-0.5">0</p>
+                        <span class="text-[9px] text-slate-500">Uncompressed dump</span>
+                    </div>
+                    <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
+                        <p class="text-[10px] font-medium text-slate-400">Tool Tokens</p>
+                        <p id="metricToolTokens" class="text-base font-semibold text-indigo-300 mt-0.5">0</p>
+                        <span class="text-[9px] text-slate-500">Structured agent tokens</span>
+                    </div>
+                </div>
 
-                    <button 
-                        type="submit" 
-                        id="sendBtn"
-                        class="bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white font-medium px-5 py-3 rounded-xl text-sm transition shadow-lg shadow-cyan-500/20 flex items-center gap-2"
-                    >
-                        <span>Send</span>
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                <!-- Active Shopping Cart Drawer -->
+                <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                            <span>🛒</span> Live Shopping Cart
+                        </h3>
+                        <span id="cartCountBadge" class="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full font-medium border border-cyan-500/30">0 items</span>
+                    </div>
+
+                    <div id="cartItemsList" class="space-y-2 text-xs max-h-36 overflow-y-auto">
+                        <p class="text-slate-500 italic">Your cart is currently empty.</p>
+                    </div>
+
+                    <div id="cartTotalSection" class="pt-2 border-t border-slate-800 flex justify-between items-center hidden">
+                        <span class="text-xs text-slate-400">Total:</span>
+                        <span id="cartTotalPrice" class="text-sm font-bold text-white">$0.00</span>
+                    </div>
+
+                    <button id="cartCheckoutBtn" onclick="sendQuickPrompt('checkout')" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 rounded-lg text-xs transition shadow hidden">
+                        Proceed to Isolated Checkout
                     </button>
-                </form>
+                    <a id="shopifyPermalinkBtn" href="#" target="_blank" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 rounded-lg text-xs transition shadow text-center block hidden">
+                        ⚡ 1-Click Shopify Checkout Permalinks
+                    </a>
+                </div>
+
+                <!-- LangGraph Tool Call Execution Traces -->
+                <div class="space-y-2">
+                    <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                        <span>FastMCP Tool Traces</span>
+                        <span class="text-[10px] text-slate-500">Live Node Log</span>
+                    </h3>
+                    <div id="toolCallTrace" class="space-y-2 text-xs">
+                        <div class="p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-slate-400">
+                            No tools executed yet. Submit a prompt to trace.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Session State & Idempotency -->
+                <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
+                    <h4 class="font-semibold text-slate-300 flex items-center gap-1.5">
+                        <span>🛡️</span> Session & Security
+                    </h4>
+                    <div class="space-y-1 text-slate-400">
+                        <p>Session: <code id="activeSessionId" class="text-cyan-400 text-[11px]">-</code></p>
+                        <p>Active LLM: <code id="activeModelLabel" class="text-cyan-300 text-[11px]">⚡ Groq API (Llama 3.3)</code></p>
+                        <p id="guardrailStatus" class="text-emerald-400 text-[11px]">🛡️ FastMCP Guardrails: Enforced</p>
+                    </div>
+                </div>
+
             </div>
         </div>
 
-        <!-- Right: AI Readability & LangGraph Telemetry Inspector -->
-        <div class="w-96 flex flex-col h-[calc(100vh-60px)] bg-slate-950 border-slate-800 overflow-y-auto p-5 space-y-6">
-            
-            <!-- Readability & Token Economy Header -->
-            <div>
-                <h2 class="text-xs font-semibold text-white uppercase tracking-wider flex items-center gap-2">
-                    <span class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                    LangGraph AI Readability & Telemetry
-                </h2>
-                <p class="text-[11px] text-slate-400 mt-1">Live token economy & graph execution audit</p>
-            </div>
-
-            <!-- Telemetry Metrics Cards -->
-            <div class="grid grid-cols-2 gap-3">
-                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
-                    <p class="text-[10px] font-medium text-slate-400">Execution Latency</p>
-                    <p id="metricLatency" class="text-lg font-bold text-emerald-400 mt-0.5">0.0 ms</p>
-                    <span class="text-[9px] text-slate-500">Sub-millisecond ready</span>
-                </div>
-                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
-                    <p class="text-[10px] font-medium text-slate-400">Token Reduction</p>
-                    <p id="metricTokenReduction" class="text-lg font-bold text-cyan-400 mt-0.5">0.0%</p>
-                    <span class="text-[9px] text-slate-500">Tool token compression</span>
-                </div>
-                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
-                    <p class="text-[10px] font-medium text-slate-400">Est. Raw Tokens</p>
-                    <p id="metricRawTokens" class="text-base font-semibold text-slate-300 mt-0.5">0</p>
-                    <span class="text-[9px] text-slate-500">Uncompressed dump</span>
-                </div>
-                <div class="bg-slate-900/90 border border-slate-800 p-3 rounded-xl shadow">
-                    <p class="text-[10px] font-medium text-slate-400">Tool Tokens</p>
-                    <p id="metricToolTokens" class="text-base font-semibold text-indigo-300 mt-0.5">0</p>
-                    <span class="text-[9px] text-slate-500">Structured agent tokens</span>
-                </div>
-            </div>
-
-            <!-- Long-Term User Persona Memory Widget -->
-            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-2 text-xs">
-                <div class="flex items-center justify-between">
-                    <h4 class="font-semibold text-slate-200 flex items-center gap-1.5">
-                        <span>👤</span> Long-Term User Persona
-                    </h4>
-                    <span class="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-mono border border-emerald-500/30">Cross-Session</span>
-                </div>
-                <div id="personaDisplay" class="space-y-1.5 text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                    <p class="text-slate-500 italic">No custom persona saved yet. (e.g. say "my size is M and I prefer FlexiSpot").</p>
-                </div>
-            </div>
-
-            <!-- Active Shopping Cart Drawer -->
-            <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 space-y-3">
-                <div class="flex justify-between items-center">
-                    <h3 class="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
-                        <span>🛒</span> Live Shopping Cart
-                    </h3>
-                    <span id="cartCountBadge" class="text-xs bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full font-medium border border-cyan-500/30">0 items</span>
+        <!-- =============================================================== -->
+        <!-- VIEW 2: FastMCP Gateway & Inspector Explorer                    -->
+        <!-- =============================================================== -->
+        <div id="viewMcp" class="flex-1 overflow-y-auto p-8 space-y-8 hidden bg-slate-950">
+            <div class="max-w-6xl mx-auto space-y-6">
+                <div>
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-3">
+                        <span class="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">🔌</span>
+                        FastMCP Service Gateway
+                    </h2>
+                    <p class="text-sm text-slate-400 mt-1">Official Model Context Protocol (v2024-11-05) Server hosting all tools, prompts, resources, and database gateways.</p>
                 </div>
 
-                <div id="cartItemsList" class="space-y-2 text-xs max-h-36 overflow-y-auto">
-                    <p class="text-slate-500 italic">Your cart is currently empty.</p>
+                <!-- MCP Sub-tabs -->
+                <div class="flex gap-2 border-b border-slate-800 pb-3">
+                    <button onclick="switchMcpTab('tools')" id="mcpTabBtnTools" class="px-4 py-2 rounded-lg bg-cyan-600 text-white font-medium text-xs">Tools (13)</button>
+                    <button onclick="switchMcpTab('prompts')" id="mcpTabBtnPrompts" class="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white font-medium text-xs">Prompts (5)</button>
+                    <button onclick="switchMcpTab('resources')" id="mcpTabBtnResources" class="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white font-medium text-xs">Resources (5)</button>
+                    <button onclick="switchMcpTab('rpc')" id="mcpTabBtnRpc" class="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white font-medium text-xs">Interactive JSON-RPC Tester</button>
                 </div>
 
-                <div id="cartTotalSection" class="pt-2 border-t border-slate-800 flex justify-between items-center hidden">
-                    <span class="text-xs text-slate-400">Total:</span>
-                    <span id="cartTotalPrice" class="text-sm font-bold text-white">$0.00</span>
-                </div>
-
-                <button id="cartCheckoutBtn" onclick="sendQuickPrompt('checkout')" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-medium py-2 rounded-lg text-xs transition shadow hidden">
-                    Proceed to Isolated Checkout
-                </button>
-            </div>
-
-            <!-- LangGraph Tool Call Execution Traces -->
-            <div class="space-y-2">
-                <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                    LangGraph Node & Tool Traces
-                </h3>
-                <div id="toolCallTrace" class="space-y-2 text-xs">
-                    <div class="p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-slate-400">
-                        No graph nodes executed yet. Submit a prompt to trace.
+                <!-- MCP Tools Panel -->
+                <div id="mcpPanelTools" class="space-y-4">
+                    <p class="text-xs text-slate-400">Registered tools consumable via MCP standard <code>tools/list</code> and <code>tools/call</code> or mapped into LangGraph:</p>
+                    <div id="mcpToolsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Loaded dynamically via /mcp/tools -->
                     </div>
                 </div>
-            </div>
 
-            <!-- Short-Term Working Memory Inspector -->
-            <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-4 space-y-2 text-xs">
-                <div class="flex items-center justify-between">
-                    <h4 class="font-semibold text-slate-200 flex items-center gap-1.5">
-                        <span>🧠</span> Short-Term Working Memory
-                    </h4>
-                    <span class="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded font-mono border border-indigo-500/30">Active Context</span>
+                <!-- MCP Prompts Panel -->
+                <div id="mcpPanelPrompts" class="space-y-4 hidden">
+                    <p class="text-xs text-slate-400">Versioned prompt templates registered via <code>@fastmcp.prompt()</code>:</p>
+                    <div id="mcpPromptsGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Loaded dynamically via /mcp/prompts -->
+                    </div>
                 </div>
-                <div id="memoryContextDisplay" class="space-y-1.5 text-slate-400 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                    <p class="text-slate-500 italic">No active product focus yet. Mention a product or search to load context.</p>
+
+                <!-- MCP Resources Panel -->
+                <div id="mcpPanelResources" class="space-y-4 hidden">
+                    <p class="text-xs text-slate-400">Real-time resources and schema endpoints accessible via <code>@fastmcp.resource()</code>:</p>
+                    <div id="mcpResourcesGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- Loaded dynamically via /mcp/resources -->
+                    </div>
+                </div>
+
+                <!-- Interactive JSON-RPC Tester -->
+                <div id="mcpPanelRpc" class="space-y-4 hidden">
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+                        <h4 class="text-sm font-semibold text-white">Send Raw JSON-RPC 2.0 Request to <code>/mcp/rpc</code></h4>
+                        <div class="flex gap-2">
+                            <button onclick="setRpcPreset('init')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded border border-slate-700">initialize</button>
+                            <button onclick="setRpcPreset('tools')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded border border-slate-700">tools/list</button>
+                            <button onclick="setRpcPreset('search')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded border border-slate-700">tools/call (search)</button>
+                            <button onclick="setRpcPreset('resource')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded border border-slate-700">resources/read (schema)</button>
+                        </div>
+                        <textarea id="rpcPayload" rows="6" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs font-mono text-cyan-300 focus:outline-none focus:border-cyan-500"></textarea>
+                        <button onclick="executeRpc()" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold">Execute JSON-RPC</button>
+                        <div>
+                            <p class="text-xs text-slate-400 mb-1">Response:</p>
+                            <pre id="rpcResponse" class="bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-emerald-400 overflow-x-auto max-h-60">Execute a request to view response...</pre>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- =============================================================== -->
+        <!-- VIEW 3: Architecture Topology Map                               -->
+        <!-- =============================================================== -->
+        <div id="viewTopology" class="flex-1 overflow-y-auto p-8 space-y-8 hidden bg-slate-950">
+            <div class="max-w-5xl mx-auto space-y-6">
+                <div>
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-3">
+                        <span class="p-2 rounded-xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">🏛️</span>
+                        AgentEcom 4-Pillar Architecture
+                    </h2>
+                    <p class="text-sm text-slate-400 mt-1">High-Throughput Autonomous Commerce Engine Decoupled Architecture</p>
+                </div>
+
+                <!-- 4 Pillars Grid -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    <!-- Pillar 1 -->
+                    <div class="bg-slate-900/90 border border-cyan-500/30 rounded-2xl p-6 space-y-3 relative overflow-hidden shadow-xl">
+                        <div class="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold text-cyan-400 tracking-wider uppercase">Pillar 1</span>
+                            <span class="text-xs px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono">/mcp</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            <span>🔌</span> FastMCP Service
+                        </h3>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            Official Model Context Protocol Server (v2024-11-05). Acts as the centralized tool registry, prompt hub, and database gateway.
+                        </p>
+                        <ul class="text-xs text-slate-400 space-y-1.5 pt-2 list-disc list-inside">
+                            <li><strong class="text-slate-200">13 FastMCP Tools:</strong> Search, product lookup, stock check, cart, checkout, returns, shipment tracking.</li>
+                            <li><strong class="text-slate-200">5 FastMCP Prompts:</strong> Versioned system prompts and specialized shopping advisor personas.</li>
+                            <li><strong class="text-slate-200">5 FastMCP Resources:</strong> Database schema, policies, live categories, orders.</li>
+                            <li><strong class="text-slate-200">Transports:</strong> In-process memory, SSE stream (<code>/mcp/sse</code>), JSON-RPC 2.0 (<code>/mcp/rpc</code>), and stdio.</li>
+                        </ul>
+                    </div>
+
+                    <!-- Pillar 2 -->
+                    <div class="bg-slate-900/90 border border-indigo-500/30 rounded-2xl p-6 space-y-3 relative overflow-hidden shadow-xl">
+                        <div class="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold text-indigo-400 tracking-wider uppercase">Pillar 2</span>
+                            <span class="text-xs px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono">agentecom/agent</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            <span>🧠</span> Autonomous Agent Service
+                        </h3>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            LangGraph StateGraph Autonomous Shopping Assistant. Bridges to FastMCP tools dynamically and orchestrates multi-turn reasoning.
+                        </p>
+                        <ul class="text-xs text-slate-400 space-y-1.5 pt-2 list-disc list-inside">
+                            <li><strong class="text-slate-200">LangGraph Pipeline:</strong> Agent Reasoning Node -> FastMCP Tool Node -> Telemetry Auditor.</li>
+                            <li><strong class="text-slate-200">Resilient Fallback Cascade:</strong> Groq -> Gemini -> OpenRouter -> Local Offline Planner.</li>
+                            <li><strong class="text-slate-200">Token Economy:</strong> Computes raw vs compressed tool tokens and reduction percentage.</li>
+                            <li><strong class="text-slate-200">Memory:</strong> Persistent short-term session context and cross-session customer persona.</li>
+                        </ul>
+                    </div>
+
+                    <!-- Pillar 3 -->
+                    <div class="bg-slate-900/90 border border-emerald-500/30 rounded-2xl p-6 space-y-3 relative overflow-hidden shadow-xl">
+                        <div class="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold text-emerald-400 tracking-wider uppercase">Pillar 3</span>
+                            <span class="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">agentecom/api</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            <span>⚙️</span> Backend Engine
+                        </h3>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            High-throughput FastAPI application orchestrating data ingestion, cache layers, search workers, and external Shopify platforms.
+                        </p>
+                        <ul class="text-xs text-slate-400 space-y-1.5 pt-2 list-disc list-inside">
+                            <li><strong class="text-slate-200">Sub-0.1ms Caching:</strong> Surgical reverse-indexed caching keyed by SKU, Category, and Query.</li>
+                            <li><strong class="text-slate-200">Zero-Polling Webhooks:</strong> HMAC-verified Shopify webhooks for real-time cache invalidation.</li>
+                            <li><strong class="text-slate-200">Hybrid Search:</strong> BM25 Sparse Lexical + Dense MiniLM Vectors + Reciprocal Rank Fusion (RRF).</li>
+                            <li><strong class="text-slate-200">Isolated Checkout:</strong> Short-TTL (15 min) transient checkout tables preventing cart pollution.</li>
+                        </ul>
+                    </div>
+
+                    <!-- Pillar 4 -->
+                    <div class="bg-slate-900/90 border border-purple-500/30 rounded-2xl p-6 space-y-3 relative overflow-hidden shadow-xl">
+                        <div class="absolute top-0 right-0 w-32 h-32 bg-purple-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold text-purple-400 tracking-wider uppercase">Pillar 4</span>
+                            <span class="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">agentecom/web</span>
+                        </div>
+                        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                            <span>🎨</span> Frontend & Storefront Widget
+                        </h3>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            Modern responsive web client, live storefront chat, telemetry inspection dashboard, and drop-in embeddable Shopify widget.
+                        </p>
+                        <ul class="text-xs text-slate-400 space-y-1.5 pt-2 list-disc list-inside">
+                            <li><strong class="text-slate-200">Conversational UI:</strong> Streaming markdown, interactive product cards, and 1-click cart addition.</li>
+                            <li><strong class="text-slate-200">Shopify Permalinks:</strong> Direct pre-filled <code>/cart/{variant_id}:{qty}</code> checkout link generation.</li>
+                            <li><strong class="text-slate-200">Embeddable Widget:</strong> <code>&lt;script src="/widget.js"&gt;</code> floating widget for any Shopify store theme.</li>
+                            <li><strong class="text-slate-200">Telemetry Inspector:</strong> Live visibility into MCP tool calls, latency, tokens, and hit rates.</li>
+                        </ul>
+                    </div>
+
                 </div>
             </div>
+        </div>
 
-            <!-- Idempotency & Session State -->
-            <div class="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
-                <h4 class="font-semibold text-slate-300 flex items-center gap-1.5">
-                    <span>🛡️</span> Idempotency & Security
-                </h4>
-                <div class="space-y-1 text-slate-400">
-                    <p>Session: <code id="activeSessionId" class="text-cyan-400 text-[11px]">-</code></p>
-                    <p>Active LLM: <code id="activeModelLabel" class="text-cyan-300 text-[11px]">⚡ Groq API (Llama 3.3)</code></p>
-                    <p id="guardrailStatus" class="text-emerald-400 text-[11px]">🛡️ Guardrail: Active & Enforced</p>
+        <!-- =============================================================== -->
+        <!-- VIEW 4: Retail Store Owner & Inventory Management Portal        -->
+        <!-- =============================================================== -->
+        <div id="viewMerchant" class="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 hidden bg-slate-950">
+            <div class="max-w-7xl mx-auto space-y-6">
+
+                <!-- Header Banner -->
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/90 border border-slate-800 rounded-2xl p-6 backdrop-blur shadow-lg">
+                    <div class="space-y-1">
+                        <div class="flex items-center gap-2.5">
+                            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-emerald-500 flex items-center justify-center font-bold text-white text-lg shadow-md shadow-cyan-500/20">
+                                🏬
+                            </div>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h2 class="text-xl md:text-2xl font-bold text-white tracking-tight">Retail Store Owner & Catalog Portal</h2>
+                                    <span class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold uppercase tracking-wider">FastMCP Synced</span>
+                                </div>
+                                <p class="text-xs text-slate-400">
+                                    Direct inventory, stock levels, pricing, and product attributes management for retail store personnel. Changes sync immediately with SQLite and the FastMCP AI Agent!
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2.5">
+                        <button onclick="toggleAddProductForm()" class="px-4 py-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-cyan-500/20 flex items-center gap-1.5 transition">
+                            <span id="addProductBtnIcon">➕</span> <span id="addProductBtnText">Add Product</span>
+                        </button>
+                        <button onclick="loadMerchantDashboard()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-xl border border-slate-700 transition" title="Refresh catalog">
+                            🔄 Refresh
+                        </button>
+                    </div>
                 </div>
-            </div>
 
+                <!-- Toast Notification Container -->
+                <div id="merchantNotification" class="hidden p-4 rounded-xl border transition-all duration-300"></div>
+
+                <!-- KPI Metric Cards -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm">
+                        <div class="text-[11px] font-medium text-slate-400 flex items-center justify-between">
+                            <span>Total Products</span>
+                            <span>📦</span>
+                        </div>
+                        <div id="kpiTotalProducts" class="text-2xl font-bold text-white mt-1">--</div>
+                        <div class="text-[10px] text-slate-500 mt-0.5">Catalog entries in database</div>
+                    </div>
+                    <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm">
+                        <div class="text-[11px] font-medium text-slate-400 flex items-center justify-between">
+                            <span>Total Stock Units</span>
+                            <span>📊</span>
+                        </div>
+                        <div id="kpiTotalStock" class="text-2xl font-bold text-cyan-400 mt-1">--</div>
+                        <div class="text-[10px] text-slate-500 mt-0.5">Physical items on hand</div>
+                    </div>
+                    <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm">
+                        <div class="text-[11px] font-medium text-slate-400 flex items-center justify-between">
+                            <span>Low Stock Items</span>
+                            <span>⚠️</span>
+                        </div>
+                        <div id="kpiLowStock" class="text-2xl font-bold text-amber-400 mt-1">--</div>
+                        <div class="text-[10px] text-slate-500 mt-0.5">Items with available stock ≤ 5</div>
+                    </div>
+                    <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-4 shadow-sm">
+                        <div class="text-[11px] font-medium text-slate-400 flex items-center justify-between">
+                            <span>Catalog Inventory Value</span>
+                            <span>💰</span>
+                        </div>
+                        <div id="kpiValuation" class="text-2xl font-bold text-emerald-400 mt-1">$--</div>
+                        <div class="text-[10px] text-slate-500 mt-0.5">Total retail inventory worth</div>
+                    </div>
+                </div>
+
+                <!-- Add New Product Form (Collapsible Card) -->
+                <div id="addProductPanel" class="hidden bg-slate-900 border border-cyan-500/40 rounded-2xl p-6 shadow-2xl space-y-4">
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-cyan-400 font-bold text-sm">✨ Add New Product to Store Catalog</span>
+                            <span class="text-[10px] px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">Auto-Indexed</span>
+                        </div>
+                        <button onclick="toggleAddProductForm()" class="text-slate-400 hover:text-white text-sm">&times; Close</button>
+                    </div>
+
+                    <form id="merchantAddProductForm" onsubmit="handleCreateProduct(event)" class="space-y-4 text-xs">
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <!-- Product Name -->
+                            <div class="md:col-span-2">
+                                <label class="block font-medium text-slate-300 mb-1">Product Name / Title *</label>
+                                <input type="text" id="newProdName" required placeholder="e.g. Vintage Leather Messenger Bag" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                            </div>
+
+                            <!-- Category -->
+                            <div>
+                                <label class="block font-medium text-slate-300 mb-1">Category *</label>
+                                <input type="text" id="newProdCategory" list="categoryDatalist" required placeholder="e.g. Accessories & Bags" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                                <datalist id="categoryDatalist">
+                                    <option value="Apparel & Fashion">
+                                    <option value="Footwear & Sneakers">
+                                    <option value="Accessories & Bags">
+                                    <option value="Electronics & Audio">
+                                    <option value="Home & Kitchen">
+                                    <option value="Sports & Outdoors">
+                                </datalist>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <!-- Price -->
+                            <div>
+                                <label class="block font-medium text-slate-300 mb-1">Retail Price ($ USD) *</label>
+                                <div class="relative">
+                                    <span class="absolute left-3 top-2.5 text-slate-400 font-bold">$</span>
+                                    <input type="number" id="newProdPrice" step="0.01" min="0.01" required placeholder="79.99" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 pl-7 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                                </div>
+                            </div>
+
+                            <!-- Initial Stock -->
+                            <div>
+                                <label class="block font-medium text-slate-300 mb-1">Initial Stock Count *</label>
+                                <input type="number" id="newProdStock" min="0" value="25" required placeholder="Quantity in store" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                            </div>
+
+                            <!-- SKU with auto-generate button -->
+                            <div>
+                                <div class="flex items-center justify-between mb-1">
+                                    <label class="font-medium text-slate-300">SKU Code</label>
+                                    <button type="button" onclick="autoGenerateSku()" class="text-[10px] text-cyan-400 hover:underline">⚡ Auto-Generate</button>
+                                </div>
+                                <input type="text" id="newProdSku" placeholder="Leave empty or e.g. SKU-BAG-009" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500 uppercase font-mono" />
+                            </div>
+                        </div>
+
+                        <!-- Product Description -->
+                        <div>
+                            <label class="block font-medium text-slate-300 mb-1">Product Description</label>
+                            <textarea id="newProdDescription" rows="2" placeholder="Full product description for customers and semantic AI agent search..." class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500"></textarea>
+                        </div>
+
+                        <!-- Product Attributes -->
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                            <div>
+                                <label class="block text-[11px] text-slate-400 mb-1">Brand</label>
+                                <input type="text" id="newAttrBrand" placeholder="e.g. Nomad Goods" class="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-slate-200 focus:outline-none focus:border-cyan-500 text-xs" />
+                            </div>
+                            <div>
+                                <label class="block text-[11px] text-slate-400 mb-1">Color</label>
+                                <input type="text" id="newAttrColor" placeholder="e.g. Saddle Brown" class="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-slate-200 focus:outline-none focus:border-cyan-500 text-xs" />
+                            </div>
+                            <div>
+                                <label class="block text-[11px] text-slate-400 mb-1">Size / Dimensions</label>
+                                <input type="text" id="newAttrSize" placeholder="e.g. Medium / 15-inch" class="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-slate-200 focus:outline-none focus:border-cyan-500 text-xs" />
+                            </div>
+                            <div>
+                                <label class="block text-[11px] text-slate-400 mb-1">Material / Tags</label>
+                                <input type="text" id="newAttrMaterial" placeholder="e.g. Full-grain Leather" class="w-full bg-slate-900 border border-slate-700 rounded-md p-2 text-slate-200 focus:outline-none focus:border-cyan-500 text-xs" />
+                            </div>
+                        </div>
+
+                        <!-- Submit actions -->
+                        <div class="flex items-center justify-between pt-2">
+                            <span class="text-[11px] text-slate-400 flex items-center gap-1.5">
+                                <span class="text-cyan-400">⚡</span> Live syncs to SQLite, FastMCP Tools, and AI Agent Hybrid Search.
+                            </span>
+                            <div class="flex gap-2">
+                                <button type="button" onclick="toggleAddProductForm()" class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium">Cancel</button>
+                                <button type="submit" id="submitProductBtn" class="px-5 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-semibold flex items-center gap-1.5 shadow-lg shadow-cyan-500/20">
+                                    <span>💾</span> <span>Save & Add to Catalog</span>
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Products Table Card -->
+                <div class="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl space-y-0">
+                    <!-- Filters and Search Bar -->
+                    <div class="p-4 border-b border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-900">
+                        <div class="flex items-center gap-3 flex-1 flex-wrap">
+                            <div class="relative flex-1 min-w-[200px] max-w-md">
+                                <span class="absolute left-3 top-2.5 text-slate-500">🔍</span>
+                                <input type="text" id="merchantSearchInput" oninput="debounceMerchantSearch()" placeholder="Search products by title, SKU, category..." class="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500" />
+                            </div>
+                            <select id="merchantCategoryFilter" onchange="loadMerchantProducts()" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+                                <option value="all">All Categories</option>
+                            </select>
+                            <select id="merchantStockFilter" onchange="loadMerchantProducts()" class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+                                <option value="all">All Stock Statuses</option>
+                                <option value="in_stock">In Stock (&gt; 5)</option>
+                                <option value="low_stock">Low Stock (≤ 5)</option>
+                                <option value="out_of_stock">Out of Stock (0)</option>
+                            </select>
+                        </div>
+                        <div class="text-xs text-slate-400 flex items-center gap-2">
+                            <span>Showing <strong id="merchantItemsCount" class="text-white">0</strong> products</span>
+                        </div>
+                    </div>
+
+                    <!-- Products Table -->
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs text-slate-300">
+                            <thead class="bg-slate-950 text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-800">
+                                <tr>
+                                    <th class="p-4">SKU / Code</th>
+                                    <th class="p-4">Product Details</th>
+                                    <th class="p-4">Category</th>
+                                    <th class="p-4 text-right">Unit Price</th>
+                                    <th class="p-4 text-center">Stock Level</th>
+                                    <th class="p-4 text-center">Quick Stock Adjust</th>
+                                    <th class="p-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="merchantProductsTableBody" class="divide-y divide-slate-800">
+                                <tr>
+                                    <td colspan="7" class="p-8 text-center text-slate-500">Loading catalog from database...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
         </div>
 
     </div>
@@ -279,211 +673,211 @@
                 <div>
                     <label class="block font-medium text-slate-300 mb-1">Google Gemini API Key (1st Fallback)</label>
                     <input type="password" id="geminiApiKeyInput" placeholder="AIzaSy..." class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
-                    <p class="text-[10px] text-slate-500 mt-1">Second in fallback sequence. Get key from aistudio.google.com.</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Second in sequence. Get key from aistudio.google.com.</p>
                 </div>
                 <div>
                     <label class="block font-medium text-slate-300 mb-1">OpenRouter API Key (2nd Fallback)</label>
                     <input type="password" id="openrouterApiKeyInput" placeholder="sk-or-v1-..." class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
-                    <p class="text-[10px] text-slate-500 mt-1">Third in fallback sequence. Get key from openrouter.ai.</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Third in sequence. Get key from openrouter.ai.</p>
                 </div>
                 <div>
-                    <label class="block font-medium text-slate-300 mb-1">Ollama Base URL (Optional)</label>
-                    <input type="text" id="ollamaUrlInput" placeholder="http://localhost:11434" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
-                    <p class="text-[10px] text-slate-500 mt-1">Used when Provider is set to '🦙 Ollama (Local LLM)'. Defaults to http://localhost:11434.</p>
+                    <label class="block font-medium text-slate-300 mb-1">Ollama Base URL (Local LLM)</label>
+                    <input type="text" id="ollamaUrlInput" value="http://localhost:11434" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
                 </div>
                 <div>
-                    <label class="block font-medium text-slate-300 mb-1">Custom Model Name (Optional)</label>
-                    <input type="text" id="modelNameInput" placeholder="llama3.2, mistral, or llama-3.3-70b-versatile" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
+                    <label class="block font-medium text-slate-300 mb-1">Custom Model Name Override</label>
+                    <input type="text" id="modelNameInput" placeholder="e.g. llama-3.3-70b-versatile, gemini-1.5-flash, mistral" class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-slate-200 focus:outline-none focus:border-cyan-500" />
                 </div>
             </div>
 
-            <div class="pt-2 flex justify-end gap-2">
-                <button onclick="toggleSettingsModal()" class="bg-cyan-600 hover:bg-cyan-500 text-white font-medium px-4 py-2 rounded-lg text-xs transition">
-                    Save & Close
-                </button>
+            <div class="flex justify-end gap-2 border-t border-slate-800 pt-3">
+                <button onclick="toggleSettingsModal()" class="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-xs">Save & Close</button>
             </div>
         </div>
     </div>
 
-    <!-- JavaScript Logic -->
+    <!-- Client Script -->
     <script>
-        let currentSessionId = "sess_" + Math.random().toString(36).substring(2, 10);
-        let isVoiceActive = false;
-        let recognition = null;
-
+        let currentSessionId = 'sess_' + Math.random().toString(36).substring(2, 10);
         document.getElementById('activeSessionId').textContent = currentSessionId;
 
-        // Initialize Web Speech API
-        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-            const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-            recognition = new SpeechRec();
-            recognition.continuous = false;
-            recognition.interimResults = false;
-            recognition.lang = 'en-US';
+        function switchView(viewName) {
+            document.getElementById('viewStorefront').classList.add('hidden');
+            document.getElementById('viewMerchant').classList.add('hidden');
+            document.getElementById('viewMcp').classList.add('hidden');
+            document.getElementById('viewTopology').classList.add('hidden');
 
-            recognition.onstart = () => {
-                isVoiceActive = true;
-                const btn = document.getElementById('voiceBtn');
-                btn.className = "bg-rose-600 border border-rose-400 text-white font-medium px-3.5 py-3 rounded-xl text-sm transition flex items-center gap-1.5 shadow animate-pulse";
-                document.getElementById('voiceIcon').textContent = '🔴';
-                document.getElementById('chatInput').placeholder = '🎙️ Listening... speak your order or search request!';
-            };
+            document.getElementById('tabBtnStorefront').classList.remove('active', 'bg-cyan-600', 'text-white');
+            document.getElementById('tabBtnMerchant').classList.remove('active', 'bg-cyan-600', 'text-white');
+            document.getElementById('tabBtnMcp').classList.remove('active', 'bg-cyan-600', 'text-white');
+            document.getElementById('tabBtnTopology').classList.remove('active', 'bg-cyan-600', 'text-white');
 
-            recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                document.getElementById('chatInput').value = transcript;
-                stopVoiceShopping();
-                handleChatSubmit(new Event('submit'));
-            };
-
-            recognition.onerror = (e) => {
-                console.warn("Speech recognition error:", e);
-                stopVoiceShopping();
-            };
-
-            recognition.onend = () => {
-                stopVoiceShopping();
-            };
-        }
-
-        function toggleVoiceShopping() {
-            if (!recognition) {
-                alert("Speech recognition is not supported in this browser. Please use Google Chrome, Microsoft Edge, or Safari.");
-                return;
-            }
-            if (isVoiceActive) {
-                recognition.stop();
-                stopVoiceShopping();
-            } else {
-                try {
-                    recognition.start();
-                } catch (e) {
-                    console.error("Failed to start voice recognition:", e);
-                }
+            if (viewName === 'storefront') {
+                document.getElementById('viewStorefront').classList.remove('hidden');
+                document.getElementById('tabBtnStorefront').classList.add('active', 'bg-cyan-600', 'text-white');
+            } else if (viewName === 'merchant') {
+                document.getElementById('viewMerchant').classList.remove('hidden');
+                document.getElementById('tabBtnMerchant').classList.add('active', 'bg-cyan-600', 'text-white');
+                loadMerchantDashboard();
+            } else if (viewName === 'mcp') {
+                document.getElementById('viewMcp').classList.remove('hidden');
+                document.getElementById('tabBtnMcp').classList.add('active', 'bg-cyan-600', 'text-white');
+                loadMcpData();
+            } else if (viewName === 'topology') {
+                document.getElementById('viewTopology').classList.remove('hidden');
+                document.getElementById('tabBtnTopology').classList.add('active', 'bg-cyan-600', 'text-white');
             }
         }
 
-        function stopVoiceShopping() {
-            isVoiceActive = false;
-            const btn = document.getElementById('voiceBtn');
-            if (btn) {
-                btn.className = "bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-cyan-500 font-medium px-3.5 py-3 rounded-xl text-sm transition flex items-center gap-1.5 shadow";
-                document.getElementById('voiceIcon').textContent = '🎙️';
-                document.getElementById('chatInput').placeholder = 'Search products, check stock, speak by voice, track orders, or checkout...';
+        function switchMcpTab(tabName) {
+            ['Tools', 'Prompts', 'Resources', 'Rpc'].forEach(t => {
+                document.getElementById('mcpPanel' + t).classList.add('hidden');
+                document.getElementById('mcpTabBtn' + t).className = "px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white font-medium text-xs";
+            });
+            const cap = tabName.charAt(0).toUpperCase() + tabName.slice(1);
+            document.getElementById('mcpPanel' + cap).classList.remove('hidden');
+            document.getElementById('mcpTabBtn' + cap).className = "px-4 py-2 rounded-lg bg-cyan-600 text-white font-medium text-xs";
+        }
+
+        async function loadMcpData() {
+            try {
+                // Fetch Tools
+                const tRes = await fetch('/mcp/tools');
+                const tData = await tRes.json();
+                const toolsGrid = document.getElementById('mcpToolsGrid');
+                toolsGrid.innerHTML = tData.tools.map(t => `
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 hover:border-cyan-500/40 transition">
+                        <div class="flex justify-between items-start">
+                            <code class="text-xs font-bold text-cyan-400">${t.name}</code>
+                            <span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">tool</span>
+                        </div>
+                        <p class="text-xs text-slate-300">${t.description}</p>
+                        <div class="text-[10px] text-slate-500 font-mono">
+                            Params: ${Object.keys(t.inputSchema?.properties || {}).join(', ') || 'none'}
+                        </div>
+                    </div>
+                `).join('');
+
+                // Fetch Prompts
+                const pRes = await fetch('/mcp/prompts');
+                const pData = await pRes.json();
+                const promptsGrid = document.getElementById('mcpPromptsGrid');
+                promptsGrid.innerHTML = pData.prompts.map(p => `
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 hover:border-indigo-500/40 transition">
+                        <div class="flex justify-between items-start">
+                            <code class="text-xs font-bold text-indigo-400">${p.name}</code>
+                            <span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">prompt</span>
+                        </div>
+                        <p class="text-xs text-slate-300">${p.description}</p>
+                    </div>
+                `).join('');
+
+                // Fetch Resources
+                const rRes = await fetch('/mcp/resources');
+                const rData = await rRes.json();
+                const resourcesGrid = document.getElementById('mcpResourcesGrid');
+                resourcesGrid.innerHTML = rData.resources.map(r => `
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2 hover:border-emerald-500/40 transition">
+                        <div class="flex justify-between items-start">
+                            <code class="text-xs font-bold text-emerald-400">${r.uri}</code>
+                            <span class="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">${r.mimeType}</span>
+                        </div>
+                        <p class="text-xs text-slate-300">${r.description || r.name}</p>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error("Error loading MCP data:", err);
             }
         }
 
-        function speakAssistantResponse(markdownText) {
-            if ('speechSynthesis' in window) {
-                window.speechSynthesis.cancel();
-                const plainText = markdownText
-                    .replace(/[\*\_\[\]\(\)\#\`]/g, '')
-                    .replace(/https?:\/\/\S+/g, '')
-                    .replace(/<[^>]*>/g, '')
-                    .trim();
-                const utterance = new SpeechSynthesisUtterance(plainText);
-                utterance.rate = 1.05;
-                utterance.pitch = 1.0;
-                window.speechSynthesis.speak(utterance);
-            }
+        function setRpcPreset(type) {
+            const presets = {
+                init: { id: 1, method: "initialize", params: {} },
+                tools: { id: 2, method: "tools/list", params: {} },
+                search: { id: 3, method: "tools/call", params: { name: "search_catalog", arguments: { query: "warm sweater", limit: 2 } } },
+                resource: { id: 4, method: "resources/read", params: { uri: "schema://database" } }
+            };
+            document.getElementById('rpcPayload').value = JSON.stringify(presets[type] || presets.init, null, 2);
         }
 
-        function syncStoredKeys() {
-            const gk = document.getElementById('groqApiKeyInput')?.value.trim() || '';
-            const gemk = document.getElementById('geminiApiKeyInput')?.value.trim() || '';
-            const ork = document.getElementById('openrouterApiKeyInput')?.value.trim() || '';
-            if (gk) localStorage.setItem('agentecom_groq_key', gk); else localStorage.removeItem('agentecom_groq_key');
-            if (gemk) localStorage.setItem('agentecom_gemini_key', gemk); else localStorage.removeItem('agentecom_gemini_key');
-            if (ork) localStorage.setItem('agentecom_openrouter_key', ork); else localStorage.removeItem('agentecom_openrouter_key');
+        async function executeRpc() {
+            const raw = document.getElementById('rpcPayload').value.trim();
+            const out = document.getElementById('rpcResponse');
+            try {
+                const parsed = JSON.parse(raw);
+                out.textContent = "Executing...";
+                const res = await fetch('/mcp/rpc', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(parsed)
+                });
+                const data = await res.json();
+                out.textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                out.textContent = "Error: " + e.message;
+            }
         }
 
         function toggleSettingsModal() {
-            const modal = document.getElementById('configModal');
-            modal.classList.toggle('hidden');
-            if (modal.classList.contains('hidden')) {
-                syncStoredKeys();
-            }
+            document.getElementById('configModal').classList.toggle('hidden');
         }
-
-        window.addEventListener('DOMContentLoaded', () => {
-            const gk = localStorage.getItem('agentecom_groq_key');
-            const gemk = localStorage.getItem('agentecom_gemini_key');
-            const ork = localStorage.getItem('agentecom_openrouter_key');
-            const gInput = document.getElementById('groqApiKeyInput');
-            const gemInput = document.getElementById('geminiApiKeyInput');
-            const orInput = document.getElementById('openrouterApiKeyInput');
-            if (gk && gInput) gInput.value = gk;
-            if (gemk && gemInput) gemInput.value = gemk;
-            if (ork && orInput) orInput.value = ork;
-            gInput?.addEventListener('input', syncStoredKeys);
-            gemInput?.addEventListener('input', syncStoredKeys);
-            orInput?.addEventListener('input', syncStoredKeys);
-        });
 
         function handleProviderChange() {
             const val = document.getElementById('providerSelect').value;
-            const labelMap = {
-                'local': '🛡️ Local Zero-Key',
+            const labels = {
+                'local': '🛡️ Local Deterministic (Zero-Key)',
                 'ollama': '🦙 Ollama (Local)',
                 'groq': '⚡ Groq -> Gemini -> OpenRouter',
                 'gemini': '✨ Google Gemini',
                 'openrouter': '🌐 OpenRouter'
             };
-            document.getElementById('activeModelLabel').textContent = labelMap[val] || val;
+            document.getElementById('activeModelLabel').textContent = labels[val] || val;
         }
 
-        function sendQuickPrompt(promptText) {
-            document.getElementById('chatInput').value = promptText;
+        function sendQuickPrompt(text) {
+            document.getElementById('chatInput').value = text;
             handleChatSubmit(new Event('submit'));
         }
 
         async function handleChatSubmit(e) {
             if (e) e.preventDefault();
             const input = document.getElementById('chatInput');
-            const userMsg = input.value.trim();
-            if (!userMsg) return;
+            const msg = input.value.trim();
+            if (!msg) return;
 
             input.value = '';
-            appendUserMessage(userMsg);
+            appendUserMessage(msg);
 
             const sendBtn = document.getElementById('sendBtn');
             sendBtn.disabled = true;
             sendBtn.innerHTML = 'Thinking...';
 
             const provider = document.getElementById('providerSelect').value;
-            const groqKey = document.getElementById('groqApiKeyInput')?.value.trim() || localStorage.getItem('agentecom_groq_key') || '';
-            const geminiKey = document.getElementById('geminiApiKeyInput')?.value.trim() || localStorage.getItem('agentecom_gemini_key') || '';
-            const openrouterKey = document.getElementById('openrouterApiKeyInput')?.value.trim() || localStorage.getItem('agentecom_openrouter_key') || '';
-            const ollamaUrl = document.getElementById('ollamaUrlInput').value.trim();
-            const modelName = document.getElementById('modelNameInput').value.trim();
+            const groqKey = document.getElementById('groqApiKeyInput')?.value.trim() || undefined;
+            const geminiKey = document.getElementById('geminiApiKeyInput')?.value.trim() || undefined;
+            const openrouterKey = document.getElementById('openrouterApiKeyInput')?.value.trim() || undefined;
+            const modelName = document.getElementById('modelNameInput')?.value.trim() || undefined;
 
             try {
-                const response = await fetch('/api/v1/agent/chat', {
+                const resp = await fetch('/api/v1/agent/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        message: userMsg,
+                        message: msg,
                         session_id: currentSessionId,
                         user_id: "default_shopper",
                         llm_provider: provider,
-                        llm_api_key: groqKey || geminiKey || openrouterKey || undefined,
-                        groq_api_key: groqKey || undefined,
-                        gemini_api_key: geminiKey || undefined,
-                        openrouter_api_key: openrouterKey || undefined,
-                        model_name: modelName || undefined,
-                        ollama_base_url: ollamaUrl || undefined,
-                        voice_mode: isVoiceActive
+                        groq_api_key: groqKey,
+                        gemini_api_key: geminiKey,
+                        openrouter_api_key: openrouterKey,
+                        model_name: modelName
                     })
                 });
-
-                const data = await response.json();
-                appendAssistantMessage(data.reply, data.products, data.fallback_active, data.readability?.fallback_reason);
+                const data = await resp.json();
+                appendAssistantMessage(data.reply, data.products, data.fallback_active, data.fallback_reason);
                 updateTelemetry(data);
-                if (data.voice_mode) {
-                    speakAssistantResponse(data.reply);
-                }
             } catch (err) {
-                appendAssistantMessage("⚠️ Error contacting AgentEcom server: " + err.message);
+                appendAssistantMessage("⚠️ Error contacting server: " + err.message);
             } finally {
                 sendBtn.disabled = false;
                 sendBtn.innerHTML = `<span>Send</span><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>`;
@@ -492,7 +886,7 @@
 
         function appendUserMessage(text) {
             const thread = document.getElementById('chatThread');
-            const msgHtml = `
+            const html = `
                 <div class="flex items-start gap-3 justify-end">
                     <div class="max-w-[80%] bg-gradient-to-r from-cyan-600 to-indigo-600 text-white rounded-2xl rounded-tr-none p-3.5 text-sm shadow-md">
                         ${escapeHtml(text)}
@@ -502,27 +896,26 @@
                     </div>
                 </div>
             `;
-            thread.insertAdjacentHTML('beforeend', msgHtml);
+            thread.insertAdjacentHTML('beforeend', html);
             thread.scrollTop = thread.scrollHeight;
         }
 
         function appendAssistantMessage(markdownText, products = [], fallbackActive = false, fallbackReason = null) {
             const thread = document.getElementById('chatThread');
-            
-            let fallbackNoticeHtml = '';
+            let fallbackNotice = '';
             if (fallbackActive) {
-                fallbackNoticeHtml = `
-                    <div class="inline-flex items-center gap-1.5 bg-amber-500/15 text-amber-300 border border-amber-500/40 text-[10px] px-2.5 py-1 rounded-full font-medium mb-1 shadow-sm">
-                        <span class="text-amber-400">⚡</span>
-                        <span class="font-semibold">Offline Fallback Active</span>
-                        ${fallbackReason ? `<span class="text-amber-400/80">• ${escapeHtml(fallbackReason)}</span>` : ''}
+                fallbackNotice = `
+                    <div class="inline-flex items-center gap-1.5 bg-amber-500/15 text-amber-300 border border-amber-500/40 text-[10px] px-2.5 py-1 rounded-full font-medium mb-2 shadow-sm">
+                        <span>⚡</span>
+                        <span>Offline Local Fallback Active</span>
+                        ${fallbackReason ? `<span>• ${escapeHtml(fallbackReason)}</span>` : ''}
                     </div>
                 `;
             }
 
-            let productCardsHtml = '';
+            let productCards = '';
             if (products && products.length > 0) {
-                productCardsHtml = `
+                productCards = `
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
                         ${products.map(p => `
                             <div class="bg-slate-900 border border-slate-700/80 rounded-xl p-3.5 flex flex-col justify-between hover:border-cyan-500/50 transition shadow">
@@ -548,191 +941,440 @@
                 `;
             }
 
-            const parsedMarkdown = marked.parse(markdownText);
-            const msgHtml = `
+            const parsedHtml = marked.parse(markdownText || '');
+            const html = `
                 <div class="flex items-start gap-3">
-                    <div class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow flex-shrink-0">
-                        🦜
+                    <div class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow">
+                        ⚡
                     </div>
                     <div class="max-w-[85%] bg-slate-800/90 border border-slate-700 rounded-2xl rounded-tl-none p-4 text-slate-200 text-sm shadow-md space-y-2">
-                        ${fallbackNoticeHtml}
-                        <div class="prose prose-invert prose-sm max-w-none text-slate-200">
-                            ${parsedMarkdown}
-                        </div>
-                        ${productCardsHtml}
+                        ${fallbackNotice}
+                        <div class="prose prose-invert prose-sm max-w-none leading-relaxed">${parsedHtml}</div>
+                        ${productCards}
                     </div>
                 </div>
             `;
-            thread.insertAdjacentHTML('beforeend', msgHtml);
+            thread.insertAdjacentHTML('beforeend', html);
             thread.scrollTop = thread.scrollHeight;
         }
 
         function updateTelemetry(data) {
-            const r = data.readability;
-            if (r) {
-                document.getElementById('metricLatency').textContent = `${r.execution_latency_ms} ms`;
-                document.getElementById('metricTokenReduction').textContent = `${r.token_reduction_pct}%`;
-                document.getElementById('metricRawTokens').textContent = r.estimated_raw_tokens;
-                document.getElementById('metricToolTokens').textContent = r.compressed_tool_tokens;
+            const rd = data.readability || {};
+            document.getElementById('metricLatency').textContent = (rd.execution_latency_ms || 0).toFixed(1) + ' ms';
+            document.getElementById('metricTokenReduction').textContent = (rd.token_reduction_pct || 0).toFixed(1) + '%';
+            document.getElementById('metricRawTokens').textContent = (rd.estimated_raw_tokens || 0).toLocaleString();
+            document.getElementById('metricToolTokens').textContent = (rd.compressed_tool_tokens || 0).toLocaleString();
+
+            if (data.mcp_server_info) {
+                document.getElementById('mcpToolsCount').textContent = data.mcp_server_info.tools_registered || 13;
+                document.getElementById('mcpPromptsCount').textContent = data.mcp_server_info.prompts_registered || 5;
+                document.getElementById('mcpResourcesCount').textContent = data.mcp_server_info.resources_registered || 5;
             }
 
-            if (data.fallback_active || (r && r.fallback_active)) {
-                document.getElementById('activeModelLabel').innerHTML = `<span class="text-amber-300 font-semibold">⚡ Offline Fallback Planner</span>`;
-            } else if (r && r.llm_provider) {
-                document.getElementById('activeModelLabel').innerHTML = `<span class="text-cyan-300">⚡ ${r.llm_provider.toUpperCase()} API</span>`;
-            }
+            // Update Cart
+            const cart = data.cart || [];
+            document.getElementById('cartCountBadge').textContent = cart.length + ' items';
+            const cartList = document.getElementById('cartItemsList');
+            const totalSec = document.getElementById('cartTotalSection');
+            const chkBtn = document.getElementById('cartCheckoutBtn');
+            const shopifyBtn = document.getElementById('shopifyPermalinkBtn');
 
-            // Update Guardrail Status Badge
-            const guardBadge = document.getElementById('guardrailStatus');
-            if (data.security_flag) {
-                guardBadge.className = "text-rose-400 font-bold text-[11px]";
-                guardBadge.innerHTML = `⛔ Guardrail Triggered: ${escapeHtml(data.security_flag)}`;
+            if (cart.length === 0) {
+                cartList.innerHTML = '<p class="text-slate-500 italic">Your cart is currently empty.</p>';
+                totalSec.classList.add('hidden');
+                chkBtn.classList.add('hidden');
+                shopifyBtn.classList.add('hidden');
             } else {
-                guardBadge.className = "text-emerald-400 text-[11px]";
-                guardBadge.innerHTML = `🛡️ Guardrail: Active & Enforced`;
+                let total = 0;
+                cartList.innerHTML = cart.map(item => {
+                    const price = item.price || 0;
+                    const sub = price * (item.quantity || 1);
+                    total += sub;
+                    return `
+                        <div class="flex justify-between items-center bg-slate-950/60 p-2 rounded-lg border border-slate-800">
+                            <div>
+                                <p class="font-medium text-white text-[11px]">${item.name || item.sku}</p>
+                                <span class="text-[10px] text-slate-400">Qty: ${item.quantity || 1} • $${price.toFixed(2)}</span>
+                            </div>
+                            <span class="text-xs font-semibold text-emerald-400">$${sub.toFixed(2)}</span>
+                        </div>
+                    `;
+                }).join('');
+                document.getElementById('cartTotalPrice').textContent = '$' + total.toFixed(2);
+                totalSec.classList.remove('hidden');
+                chkBtn.classList.remove('hidden');
+
+                if (data.checkout_session && data.checkout_session.checkout_url) {
+                    shopifyBtn.href = data.checkout_session.checkout_url;
+                    shopifyBtn.classList.remove('hidden');
+                }
             }
 
-            // Update Long-Term User Persona Display
-            const persona = data.user_persona;
-            const personaContainer = document.getElementById('personaDisplay');
-            if (persona && (Object.keys(persona.sizing || {}).length > 0 || (persona.brand_affinities || []).length > 0 || (persona.allergies || []).length > 0)) {
-                let pHtml = '<div class="space-y-1">';
-                if (persona.sizing && Object.keys(persona.sizing).length > 0) {
-                    const sizes = Object.entries(persona.sizing).map(([k, v]) => `${k.toUpperCase()}: ${v}`).join(', ');
-                    pHtml += `<div><span class="text-slate-400">📏 Sizing:</span> <span class="text-cyan-300 font-semibold">${escapeHtml(sizes)}</span></div>`;
-                }
-                if (persona.brand_affinities && persona.brand_affinities.length > 0) {
-                    pHtml += `<div><span class="text-slate-400">🏷️ Favorite Brands:</span> <span class="text-emerald-400 font-semibold">${escapeHtml(persona.brand_affinities.join(', '))}</span></div>`;
-                }
-                if (persona.allergies && persona.allergies.length > 0) {
-                    pHtml += `<div><span class="text-slate-400">⚠️ Constraints:</span> <span class="text-amber-400 font-semibold">${escapeHtml(persona.allergies.join(', '))}</span></div>`;
-                }
-                pHtml += '</div>';
-                personaContainer.innerHTML = pHtml;
-            }
-
-            // Update Short-Term Working Memory Section
-            const memContainer = document.getElementById('memoryContextDisplay');
-            const mem = data.short_term_memory;
-            if (mem && (mem.active_product || mem.active_order || (mem.recent_skus && mem.recent_skus.length > 0))) {
-                let memHtml = '';
-                if (mem.active_order) {
-                    memHtml += `
-                        <div class="space-y-1 mb-2">
-                            <span class="text-[10px] text-amber-400 font-semibold uppercase tracking-wide">Active Order Context:</span>
-                            <div class="bg-slate-900 border border-slate-800 p-2 rounded">
-                                <div class="font-mono text-cyan-300 text-[11px] font-semibold">${escapeHtml(mem.active_order.order_number || '')}</div>
-                                <div class="flex justify-between text-[10px] text-slate-400 mt-0.5">
-                                    <span>${escapeHtml(mem.active_order.created_at || 'Recently')}</span>
-                                    <span class="text-emerald-400 font-bold">$${(mem.active_order.total_amount || 0).toFixed(2)}</span>
-                                </div>
-                            </div>
+            // Update Tool Traces
+            const traceBox = document.getElementById('toolCallTrace');
+            const tools = data.tool_calls_made || [];
+            if (tools.length === 0) {
+                traceBox.innerHTML = '<div class="p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-slate-400">No tool calls on this turn. Direct response.</div>';
+            } else {
+                traceBox.innerHTML = tools.map(tc => `
+                    <div class="p-2.5 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
+                        <div class="flex justify-between items-center">
+                            <span class="font-mono text-cyan-400 text-[11px] font-semibold">${tc.tool}</span>
+                            <span class="text-[10px] text-emerald-400">✓ FastMCP</span>
                         </div>
-                    `;
-                }
-                if (mem.active_product) {
-                    const attrsList = mem.active_product.attributes ? Object.entries(mem.active_product.attributes).slice(0, 2).map(([k, v]) => `${k}: ${v}`).join(', ') : '';
-                    memHtml += `
-                        <div class="space-y-1">
-                            <span class="text-[10px] text-indigo-400 font-semibold uppercase tracking-wide">Active Focus Product:</span>
-                            <div class="bg-slate-900 border border-slate-800 p-2 rounded">
-                                <div class="font-medium text-white line-clamp-1">${escapeHtml(mem.active_product.name || '')}</div>
-                                <div class="flex justify-between text-[10px] text-slate-400 font-mono mt-0.5">
-                                    <span>${escapeHtml(mem.active_product.sku || '')}</span>
-                                    <span class="text-emerald-400 font-bold">$${(mem.active_product.price || 0).toFixed(2)}</span>
-                                </div>
-                                ${attrsList ? `<div class="text-[9px] text-slate-400 mt-1 italic line-clamp-1">${escapeHtml(attrsList)}</div>` : ''}
-                            </div>
-                        </div>
-                    `;
-                }
-                if (mem.recent_skus && mem.recent_skus.length > 0) {
-                    memHtml += `
-                        <div class="pt-1">
-                            <span class="text-[10px] text-slate-400">Recent Context SKUs:</span>
-                            <div class="flex flex-wrap gap-1 mt-1">
-                                ${mem.recent_skus.map(s => `<span class="bg-slate-900 text-cyan-300 font-mono text-[10px] px-1.5 py-0.5 rounded border border-slate-800">${escapeHtml(s)}</span>`).join('')}
-                            </div>
-                        </div>
-                    `;
-                }
-                if (mem.recent_queries && mem.recent_queries.length > 0) {
-                    memHtml += `
-                        <div class="pt-1 text-[10px] text-slate-400">
-                            <span>Last Search:</span> <span class="text-slate-300 font-medium">${escapeHtml(mem.recent_queries[mem.recent_queries.length - 1])}</span>
-                        </div>
-                    `;
-                }
-                memContainer.innerHTML = memHtml;
-            }
-
-            // Update Tool Call Traces
-            const traceContainer = document.getElementById('toolCallTrace');
-            if (data.tool_calls_made && data.tool_calls_made.length > 0) {
-                traceContainer.innerHTML = data.tool_calls_made.map(tc => `
-                    <div class="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-1.5">
-                        <div class="flex items-center justify-between">
-                            <span class="font-mono text-cyan-400 text-xs font-semibold">${tc.tool}</span>
-                            <span class="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">Node Executed</span>
-                        </div>
-                        <pre class="text-[10px] text-slate-400 bg-slate-950 p-2 rounded overflow-x-auto">${JSON.stringify(tc.args, null, 2)}</pre>
+                        <pre class="text-[10px] bg-slate-950 p-1.5 rounded text-slate-400 font-mono overflow-x-auto">${JSON.stringify(tc.arguments || {}, null, 1)}</pre>
                     </div>
                 `).join('');
-            }
-
-            // Update Cart Section
-            const cartItemsList = document.getElementById('cartItemsList');
-            const cartCountBadge = document.getElementById('cartCountBadge');
-            const cartTotalSection = document.getElementById('cartTotalSection');
-            const cartTotalPrice = document.getElementById('cartTotalPrice');
-            const cartCheckoutBtn = document.getElementById('cartCheckoutBtn');
-
-            if (data.cart && data.cart.length > 0) {
-                const totalItems = data.cart.reduce((sum, i) => sum + i.quantity, 0);
-                const totalPrice = data.cart.reduce((sum, i) => sum + (i.price * i.quantity), 0);
-
-                cartCountBadge.textContent = `${totalItems} item(s)`;
-                cartItemsList.innerHTML = data.cart.map(i => `
-                    <div class="flex justify-between items-center bg-slate-950/60 p-2 rounded-lg border border-slate-800">
-                        <div>
-                            <span class="font-medium text-white">${i.quantity}x ${i.name}</span>
-                            <div class="text-[10px] text-slate-400 font-mono">${i.sku}</div>
-                        </div>
-                        <span class="font-bold text-emerald-400">$${(i.price * i.quantity).toFixed(2)}</span>
-                    </div>
-                `).join('');
-
-                cartTotalSection.classList.remove('hidden');
-                cartTotalPrice.textContent = `$${totalPrice.toFixed(2)}`;
-                cartCheckoutBtn.classList.remove('hidden');
-            } else {
-                cartCountBadge.textContent = `0 items`;
-                cartItemsList.innerHTML = `<p class="text-slate-500 italic">Your cart is currently empty.</p>`;
-                cartTotalSection.classList.add('hidden');
-                cartCheckoutBtn.classList.add('hidden');
             }
         }
 
-        async function resetConversation() {
-            await fetch(`/api/v1/agent/sessions/${currentSessionId}`, { method: 'DELETE' });
-            currentSessionId = "sess_" + Math.random().toString(36).substring(2, 10);
+        function resetConversation() {
+            currentSessionId = 'sess_' + Math.random().toString(36).substring(2, 10);
             document.getElementById('activeSessionId').textContent = currentSessionId;
-            document.getElementById('chatThread').innerHTML = '';
-            document.getElementById('cartItemsList').innerHTML = `<p class="text-slate-500 italic">Your cart is currently empty.</p>`;
+            document.getElementById('chatThread').innerHTML = `
+                <div class="flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow">
+                        ⚡
+                    </div>
+                    <div class="max-w-[85%] bg-slate-800/90 border border-slate-700 rounded-2xl rounded-tl-none p-4 text-slate-200 text-sm shadow-md">
+                        Conversation reset. FastMCP session staging initialized.
+                    </div>
+                </div>
+            `;
+            document.getElementById('cartItemsList').innerHTML = '<p class="text-slate-500 italic">Your cart is currently empty.</p>';
             document.getElementById('cartCountBadge').textContent = '0 items';
             document.getElementById('cartTotalSection').classList.add('hidden');
             document.getElementById('cartCheckoutBtn').classList.add('hidden');
-            document.getElementById('memoryContextDisplay').innerHTML = `<p class="text-slate-500 italic">No active product focus yet. Mention a product or search to load context.</p>`;
-            document.getElementById('toolCallTrace').innerHTML = `<div class="p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-slate-400">Session cleared.</div>`;
-            
-            appendAssistantMessage("Session reset. How can I help you with shopping today?");
+            document.getElementById('shopifyPermalinkBtn').classList.add('hidden');
         }
 
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+        function escapeHtml(str) {
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
+
+        // =====================================================================
+        // Retail Store Owner Portal Functions
+        // =====================================================================
+        let merchantSearchTimeout = null;
+
+        function toggleAddProductForm() {
+            const panel = document.getElementById('addProductPanel');
+            const isHidden = panel.classList.contains('hidden');
+            if (isHidden) {
+                panel.classList.remove('hidden');
+                document.getElementById('addProductBtnIcon').textContent = '✖';
+                document.getElementById('addProductBtnText').textContent = 'Close Form';
+                document.getElementById('newProdName').focus();
+            } else {
+                panel.classList.add('hidden');
+                document.getElementById('addProductBtnIcon').textContent = '➕';
+                document.getElementById('addProductBtnText').textContent = 'Add Product';
+            }
+        }
+
+        function autoGenerateSku() {
+            const cat = document.getElementById('newProdCategory').value || 'GEN';
+            const cleanCat = cat.replace(/[^a-zA-Z0-9]/g, '').substring(0, 3).toUpperCase() || 'GEN';
+            const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
+            document.getElementById('newProdSku').value = `SKU-${cleanCat}-${rand}`;
+        }
+
+        function showMerchantNotification(message, type = 'success') {
+            const el = document.getElementById('merchantNotification');
+            el.className = `p-4 rounded-xl border text-xs flex items-center justify-between ${
+                type === 'success'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+            }`;
+            el.innerHTML = `
+                <div class="flex items-center gap-2">
+                    <span class="text-base">${type === 'success' ? '✅' : '⚠️'}</span>
+                    <span>${message}</span>
+                </div>
+                <button onclick="this.parentElement.classList.add('hidden')" class="text-slate-400 hover:text-white text-base">&times;</button>
+            `;
+            el.classList.remove('hidden');
+            setTimeout(() => {
+                el.classList.add('hidden');
+            }, 6000);
+        }
+
+        async function loadMerchantDashboard() {
+            try {
+                // 1. Fetch Metrics
+                const mRes = await fetch('/api/v1/merchant/metrics');
+                if (mRes.ok) {
+                    const metrics = await mRes.json();
+                    document.getElementById('kpiTotalProducts').textContent = metrics.total_products || 0;
+                    document.getElementById('kpiTotalStock').textContent = metrics.total_stock_units || 0;
+                    document.getElementById('kpiLowStock').textContent = (metrics.low_stock_count || 0) + (metrics.out_of_stock_count || 0);
+                    document.getElementById('kpiValuation').textContent = '$' + (metrics.total_valuation || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+
+                    // Populate categories dropdown
+                    const catSelect = document.getElementById('merchantCategoryFilter');
+                    const currentVal = catSelect.value;
+                    const catOptions = ['<option value="all">All Categories</option>'];
+                    if (metrics.categories) {
+                        Object.keys(metrics.categories).forEach(c => {
+                            catOptions.push(`<option value="${escapeHtml(c)}">${escapeHtml(c)} (${metrics.categories[c].count})</option>`);
+                        });
+                    }
+                    catSelect.innerHTML = catOptions.join('');
+                    catSelect.value = currentVal;
+                }
+
+                // 2. Fetch Products
+                await loadMerchantProducts();
+            } catch (err) {
+                console.error("Failed to load merchant dashboard:", err);
+            }
+        }
+
+        async function loadMerchantProducts() {
+            const tableBody = document.getElementById('merchantProductsTableBody');
+            const q = document.getElementById('merchantSearchInput')?.value?.trim() || '';
+            const cat = document.getElementById('merchantCategoryFilter')?.value || 'all';
+            const status = document.getElementById('merchantStockFilter')?.value || 'all';
+
+            try {
+                const params = new URLSearchParams();
+                if (q) params.set('query', q);
+                if (cat && cat !== 'all') params.set('category', cat);
+                if (status && status !== 'all') params.set('stock_status', status);
+
+                const res = await fetch(`/api/v1/merchant/products?${params.toString()}`);
+                if (!res.ok) throw new Error("Failed to load products");
+                const data = await res.json();
+                const products = data.products || [];
+
+                document.getElementById('merchantItemsCount').textContent = data.total || products.length;
+
+                if (products.length === 0) {
+                    tableBody.innerHTML = `
+                        <tr>
+                            <td colspan="7" class="p-8 text-center text-slate-500">
+                                No products found matching your filters. Click <strong>Add Product</strong> above to add one.
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                tableBody.innerHTML = products.map(p => {
+                    const stock = p.stock_count || 0;
+                    const avail = p.available_count || 0;
+                    let badgeClass = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                    let badgeText = `In Stock (${avail})`;
+                    if (avail === 0) {
+                        badgeClass = "bg-rose-500/10 text-rose-400 border-rose-500/20";
+                        badgeText = "Out of Stock";
+                    } else if (avail <= 5) {
+                        badgeClass = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+                        badgeText = `Low Stock (${avail})`;
+                    }
+
+                    const attrStr = p.attributes ? Object.entries(p.attributes).slice(0, 3).map(([k, v]) => `<span class="bg-slate-800 px-1.5 py-0.5 rounded text-[10px] text-slate-400">${escapeHtml(k)}: ${escapeHtml(v)}</span>`).join(' ') : '';
+
+                    return `
+                        <tr class="hover:bg-slate-900/60 transition ${!p.is_active ? 'opacity-50' : ''}">
+                            <td class="p-4 font-mono font-bold text-cyan-300 text-xs">${escapeHtml(p.sku)}</td>
+                            <td class="p-4">
+                                <div class="font-medium text-white text-xs">${escapeHtml(p.name)}</div>
+                                <div class="text-[11px] text-slate-400 line-clamp-1">${escapeHtml(p.description || '')}</div>
+                                <div class="flex items-center gap-1 mt-1 flex-wrap">${attrStr}</div>
+                            </td>
+                            <td class="p-4 text-slate-300">${escapeHtml(p.category)}</td>
+                            <td class="p-4 text-right font-bold text-white">
+                                <span class="hover:text-cyan-300 cursor-pointer" onclick="quickEditPrice('${p.sku}', ${p.price})" title="Click to edit price">$${parseFloat(p.price).toFixed(2)} ✏️</span>
+                            </td>
+                            <td class="p-4 text-center">
+                                <span class="inline-block px-2.5 py-1 rounded-full text-[10px] font-semibold border ${badgeClass}">
+                                    ${badgeText}
+                                </span>
+                            </td>
+                            <td class="p-4 text-center">
+                                <div class="inline-flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
+                                    <button onclick="quickAdjustStock('${p.sku}', -1)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center font-bold text-xs" title="Decrease stock by 1">-1</button>
+                                    <button onclick="quickEditStock('${p.sku}', ${stock})" class="px-2 py-0.5 text-xs text-white font-mono hover:text-cyan-300" title="Click to enter exact stock">${stock}</button>
+                                    <button onclick="quickAdjustStock('${p.sku}', 1)" class="w-6 h-6 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center font-bold text-xs" title="Increase stock by 1">+1</button>
+                                    <button onclick="quickAdjustStock('${p.sku}', 10)" class="px-1.5 h-6 rounded bg-cyan-900/40 hover:bg-cyan-800/60 text-cyan-300 flex items-center justify-center text-[10px] font-semibold" title="Restock +10">+10</button>
+                                </div>
+                            </td>
+                            <td class="p-4 text-right space-x-1">
+                                <button onclick="quickToggleActive('${p.sku}', ${p.is_active})" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300" title="${p.is_active ? 'Deactivate' : 'Activate'}">
+                                    ${p.is_active ? 'Active' : 'Hidden'}
+                                </button>
+                                <button onclick="quickDeleteProduct('${p.sku}')" class="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px]" title="Archive product">
+                                    🗑️
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (err) {
+                tableBody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-rose-400">Failed to load products: ${escapeHtml(err.message)}</td></tr>`;
+            }
+        }
+
+        async function handleCreateProduct(event) {
+            event.preventDefault();
+            const btn = document.getElementById('submitProductBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span>⏳</span> Saving...';
+
+            try {
+                const name = document.getElementById('newProdName').value.trim();
+                const category = document.getElementById('newProdCategory').value.trim();
+                const price = parseFloat(document.getElementById('newProdPrice').value);
+                const stock = parseInt(document.getElementById('newProdStock').value, 10) || 0;
+                const sku = document.getElementById('newProdSku').value.trim();
+                const description = document.getElementById('newProdDescription').value.trim();
+
+                const attributes = {};
+                const brand = document.getElementById('newAttrBrand').value.trim();
+                const color = document.getElementById('newAttrColor').value.trim();
+                const size = document.getElementById('newAttrSize').value.trim();
+                const material = document.getElementById('newAttrMaterial').value.trim();
+                if (brand) attributes.brand = brand;
+                if (color) attributes.color = color;
+                if (size) attributes.size = size;
+                if (material) attributes.material = material;
+
+                const payload = {
+                    name,
+                    category,
+                    price,
+                    stock,
+                    sku: sku || undefined,
+                    description,
+                    attributes
+                };
+
+                const res = await fetch('/api/v1/merchant/products', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.detail || "Failed to create product");
+                }
+
+                showMerchantNotification(`Product "${data.product.name}" (${data.product.sku}) created! Synced to SQLite & FastMCP. Switch to Storefront to ask the AI Agent about it.`);
+                document.getElementById('merchantAddProductForm').reset();
+                toggleAddProductForm();
+                await loadMerchantDashboard();
+            } catch (err) {
+                showMerchantNotification(err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<span>💾</span> <span>Save & Add to Catalog</span>';
+            }
+        }
+
+        async function quickAdjustStock(sku, delta) {
+            try {
+                const res = await fetch(`/api/v1/merchant/products/${encodeURIComponent(sku)}/stock`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({quantity: delta, mode: 'adjust', reason: 'Retail Dashboard quick adjust'})
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || "Failed to adjust stock");
+                showMerchantNotification(`Stock for ${sku} updated to ${data.current_stock} units.`);
+                await loadMerchantDashboard();
+            } catch (err) {
+                showMerchantNotification(err.message, 'error');
+            }
+        }
+
+        async function quickEditStock(sku, currentStock) {
+            const input = prompt(`Enter exact stock count for SKU ${sku}:`, currentStock);
+            if (input === null) return;
+            const newCount = parseInt(input, 10);
+            if (isNaN(newCount) || newCount < 0) {
+                alert("Please enter a valid non-negative number.");
+                return;
+            }
+            try {
+                const res = await fetch(`/api/v1/merchant/products/${encodeURIComponent(sku)}/stock`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({quantity: newCount, mode: 'set', reason: 'Manual retail stock count'})
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || "Failed to set stock");
+                showMerchantNotification(`Stock for ${sku} set to ${data.current_stock}.`);
+                await loadMerchantDashboard();
+            } catch (err) {
+                showMerchantNotification(err.message, 'error');
+            }
+        }
+
+        async function quickEditPrice(sku, currentPrice) {
+            const input = prompt(`Enter new unit price ($ USD) for SKU ${sku}:`, currentPrice);
+            if (input === null) return;
+            const newPrice = parseFloat(input);
+            if (isNaN(newPrice) || newPrice <= 0) {
+                alert("Please enter a valid positive price.");
+                return;
+            }
+            try {
+                const res = await fetch(`/api/v1/merchant/products/${encodeURIComponent(sku)}`, {
+                    method: 'PATCH',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({price: newPrice})
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || "Failed to update price");
+                showMerchantNotification(`Price for ${sku} updated to $${newPrice.toFixed(2)}.`);
+                await loadMerchantDashboard();
+            } catch (err) {
+                showMerchantNotification(err.message, 'error');
+            }
+        }
+
+        async function quickToggleActive(sku, currentActive) {
+            try {
+                const res = await fetch(`/api/v1/merchant/products/${encodeURIComponent(sku)}`, {
+                    method: 'PATCH',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({is_active: !currentActive})
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || "Failed to update status");
+                showMerchantNotification(`Product ${sku} is now ${data.product.is_active ? 'Active' : 'Hidden'}.`);
+                await loadMerchantDashboard();
+            } catch (err) {
+                showMerchantNotification(err.message, 'error');
+            }
+        }
+
+        async function quickDeleteProduct(sku) {
+            if (!confirm(`Are you sure you want to archive product ${sku}?`)) return;
+            try {
+                const res = await fetch(`/api/v1/merchant/products/${encodeURIComponent(sku)}?permanent=false`, {
+                    method: 'DELETE'
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.detail || "Failed to archive product");
+                showMerchantNotification(data.message || `Product ${sku} archived.`);
+                await loadMerchantDashboard();
+            } catch (err) {
+                showMerchantNotification(err.message, 'error');
+            }
+        }
+
+        function debounceMerchantSearch() {
+            if (merchantSearchTimeout) clearTimeout(merchantSearchTimeout);
+            merchantSearchTimeout = setTimeout(() => {
+                loadMerchantProducts();
+            }, 300);
+        }
+
+        // Initialize preset
+        setRpcPreset('init');
     </script>
 </body>
 </html>

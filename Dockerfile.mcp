@@ -1,0 +1,31 @@
+# Convenience copy of docker/Dockerfile.mcp
+FROM python:3.11-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    DATABASE_URL=sqlite+aiosqlite:////app/data/agentecom.db \
+    MCP_PORT=8001
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY agentecom/ /app/agentecom/
+
+RUN mkdir -p /app/data
+
+EXPOSE 8001
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8001/health || exit 1
+
+CMD ["uvicorn", "agentecom.mcp.service:app", "--host", "0.0.0.0", "--port", "8001"]

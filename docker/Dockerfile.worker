@@ -1,0 +1,31 @@
+# ==============================================================================
+# AgentEcom — Asynchronous Search & Catalog Indexing Worker
+# Background consumer for BM25 indexing and dense vector embeddings
+# ==============================================================================
+FROM python:3.11-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    DATABASE_URL=sqlite+aiosqlite:////app/data/agentecom.db
+
+WORKDIR /app
+
+# Install system build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application source code
+COPY agentecom/ /app/agentecom/
+
+# Create persistent data directory for SQLite & embeddings
+RUN mkdir -p /app/data
+
+CMD ["python", "-m", "agentecom.search.run_worker"]

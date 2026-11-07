@@ -18,9 +18,15 @@ logger = logging.getLogger("agentecom.worker")
 
 class AsyncIndexWorker:
     def __init__(self):
-        self.queue: asyncio.Queue = asyncio.Queue()
+        self._queue: Optional[asyncio.Queue] = None
         self._worker_task: Optional[asyncio.Task] = None
         self._is_running = False
+
+    @property
+    def queue(self) -> asyncio.Queue:
+        if self._queue is None:
+            self._queue = asyncio.Queue()
+        return self._queue
 
     async def start(self):
         """Start background consumer loop."""

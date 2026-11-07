@@ -1,0 +1,122 @@
+services:
+  # ============================================================================
+  # 1. Core Commerce API & Web Storefront Service
+  # ============================================================================
+  agentecom-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: agentecom-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/agentecom.db
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-local}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_MODEL_NAME=${GROQ_MODEL_NAME:-llama-3.3-70b-versatile}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL_NAME=${GEMINI_MODEL_NAME:-gemini-1.5-flash}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL_NAME=${OPENROUTER_MODEL_NAME:-meta-llama/llama-3.3-70b-instruct}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+    volumes:
+      - agentecom-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - agentecom-network
+
+  # ============================================================================
+  # 2. Dedicated FastMCP Server Microservice (MCP Protocol v2024-11-05)
+  # ============================================================================
+  agentecom-mcp:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mcp
+    container_name: agentecom-mcp
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/agentecom.db
+      - MCP_PORT=8001
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+    volumes:
+      - agentecom-data:/app/data
+    depends_on:
+      agentecom-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - agentecom-network
+
+  # ============================================================================
+  # 3. Asynchronous Search & Catalog Indexing Worker Service
+  # ============================================================================
+  agentecom-worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: agentecom-worker
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/agentecom.db
+      - WORKER_POLL_INTERVAL_SECONDS=30
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+    volumes:
+      - agentecom-data:/app/data
+    depends_on:
+      agentecom-api:
+        condition: service_healthy
+    networks:
+      - agentecom-network
+
+  # ============================================================================
+  # 4. Interactive AI Shopping Agent Terminal CLI (Run on-demand)
+  # ============================================================================
+  agentecom-cli:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.cli
+    container_name: agentecom-cli
+    profiles:
+      - cli
+    stdin_open: true
+    tty: true
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/agentecom.db
+      - DEFAULT_LLM_PROVIDER=${DEFAULT_LLM_PROVIDER:-local}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - TERM=xterm-256color
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+    volumes:
+      - agentecom-data:/app/data
+    networks:
+      - agentecom-network
+
+volumes:
+  agentecom-data:
+    name: agentecom-shared-data
+
+networks:
+  agentecom-network:
+    name: agentecom-net
+    driver: bridge

@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from agentecom.agent.state import AgentState, ReadabilityMetric
 from agentecom.agent.graph import commerce_langgraph_app
 from agentecom.config import settings, reload_settings
+from agentecom.mcp.server import fastmcp_server
 
 class AgentMessage(Dict[str, Any]):
     pass
@@ -150,6 +151,10 @@ class AutonomousCommerceAgent:
         run_config = {
             "run_name": f"commerce_turn_{session['session_id'][:8]}",
             "tags": ["AgentEcom", active_provider, active_model or "default"],
+            "configurable": {
+                "user_id": u_id,
+                "session_id": session["session_id"]
+            },
             "metadata": {
                 "session_id": session["session_id"],
                 "user_id": u_id,
@@ -179,6 +184,15 @@ class AutonomousCommerceAgent:
         session["messages"].append({"role": "user", "content": user_input})
         session["messages"].append({"role": "assistant", "content": final_msg})
 
+        mcp_telemetry = {
+            "server": fastmcp_server.name,
+            "version": fastmcp_server.version,
+            "protocol": "MCP 2024-11-05",
+            "tools_registered": len(fastmcp_server._tools),
+            "prompts_registered": len(fastmcp_server._prompts),
+            "resources_registered": len(fastmcp_server._resources)
+        }
+
         return {
             "reply": final_msg,
             "session_id": session["session_id"],
@@ -198,7 +212,28 @@ class AutonomousCommerceAgent:
             "security_flag": result_state.get("security_flag"),
             "requires_human_approval": bool(result_state.get("requires_human_approval", False)),
             "voice_mode": voice_mode,
-            "readability": result_state.get("readability", {})
+            "readability": result_state.get("readability", {}),
+            "mcp_server_info": mcp_telemetry
         }
 
+    async def stream_user_turn(self, **kwargs):
+        """
+        Streaming generator for Agent turn: yields tool notifications followed by token chunks and final response.
+        """
+        # Execute turn and stream chunks
+        res = await self.process_user_turn(**kwargs)
+        reply = res["reply"]
+        
+        # Yield metadata first
+        yield {"event": "metadata", "data": {"session_id": res["session_id"], "provider": res["provider_used"], "tools": res["tool_calls_made"]}}
+        
+        # Stream reply in smooth word chunks
+        words = reply.split(" ")
+        for i in range(0, len(words), 3):
+            chunk = " ".join(words[i:i+3]) + " "
+            yield {"event": "token", "data": chunk}
+        
+        yield {"event": "done", "data": res}
+
+AgentService = AutonomousCommerceAgent
 agent_engine = AutonomousCommerceAgent()

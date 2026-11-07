@@ -35,7 +35,8 @@ class CheckoutManager:
         db: AsyncSession,
         items: List[Dict[str, Any]],  # [{"sku": "SKU-4471", "quantity": 2}, ...]
         idempotency_key: str,
-        ttl_minutes: Optional[int] = None
+        ttl_minutes: Optional[int] = None,
+        user_id: Optional[str] = "default_shopper"
     ) -> Tuple[CheckoutSession, bool]:
         """
         Create a new short-lived checkout session or return existing if idempotency key matches.
@@ -117,6 +118,7 @@ class CheckoutManager:
 
         session = CheckoutSession(
             id=session_id,
+            user_id=user_id or "default_shopper",
             idempotency_key=idempotency_key,
             cart_json=json.dumps(validated_items),
             total_amount=round(total_amount, 2),
@@ -135,7 +137,8 @@ class CheckoutManager:
         db: AsyncSession,
         session_id: str,
         idempotency_key: str,
-        customer_email: Optional[str] = "agent-checkout@agentecom.internal"
+        customer_email: Optional[str] = "agent-checkout@agentecom.internal",
+        user_id: Optional[str] = None
     ) -> Tuple[Order, bool]:
         """
         Confirm an isolated checkout session and promote to a permanent Order.
@@ -146,6 +149,8 @@ class CheckoutManager:
         order_res = await db.execute(order_stmt)
         existing_order = order_res.scalar_one_or_none()
         if existing_order:
+            if user_id and existing_order.user_id and existing_order.user_id != user_id:
+                raise CheckoutError("Unauthorized: Order belongs to another user account.", 403)
             return existing_order, False
 
         # 2. Retrieve Checkout Session
@@ -155,6 +160,10 @@ class CheckoutManager:
 
         if not session:
             raise CheckoutError(f"Checkout session '{session_id}' not found.", 404)
+
+        # Enforce server-side user ownership verification
+        if user_id and session.user_id and session.user_id != user_id:
+            raise CheckoutError("Unauthorized: Checkout session belongs to another user account.", 403)
 
         if session.status == SessionStatus.COMPLETED:
             # Look up order created for this session
@@ -193,6 +202,7 @@ class CheckoutManager:
         order_number = f"ORD-{datetime.datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
         order = Order(
             order_number=order_number,
+            user_id=user_id or session.user_id or "default_shopper",
             idempotency_key=idempotency_key,
             checkout_session_id=session.id,
             items_json=session.cart_json,

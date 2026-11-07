@@ -16,7 +16,8 @@ class ConfirmSessionRequest(BaseModel):
 @router.post("/session")
 async def create_checkout_session(
     payload: CreateSessionRequest,
-    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key")
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    x_user_id: Optional[str] = Header("default_shopper", alias="X-User-Id")
 ):
     """
     Create a short-lived isolated checkout session.
@@ -30,7 +31,8 @@ async def create_checkout_session(
     res = await tool_create_checkout_session(
         items=items_list,
         idempotency_key=idempotency_key,
-        ttl_minutes=payload.ttl_minutes
+        ttl_minutes=payload.ttl_minutes,
+        user_id=x_user_id
     )
 
     if "error" in res:
@@ -40,7 +42,8 @@ async def create_checkout_session(
 @router.post("/confirm")
 async def confirm_checkout(
     payload: ConfirmSessionRequest,
-    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key")
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    x_user_id: Optional[str] = Header("default_shopper", alias="X-User-Id")
 ):
     """
     Confirm an isolated checkout session and promote to permanent Order.
@@ -52,7 +55,8 @@ async def confirm_checkout(
     res = await tool_confirm_checkout(
         session_id=payload.session_id,
         idempotency_key=idempotency_key,
-        customer_email=payload.customer_email
+        customer_email=payload.customer_email,
+        user_id=x_user_id
     )
 
     if "error" in res:

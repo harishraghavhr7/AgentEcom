@@ -1,0 +1,25 @@
+# Convenience copy of docker/Dockerfile.cli
+FROM python:3.11-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    DATABASE_URL=sqlite+aiosqlite:////app/data/agentecom.db \
+    TERM=xterm-256color
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY agentecom/ /app/agentecom/
+
+RUN mkdir -p /app/data
+
+ENTRYPOINT ["python", "-m", "agentecom.agent_cli"]

@@ -1,4 +1,6 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+import json
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from agentecom.agent.engine import agent_engine
@@ -49,6 +51,49 @@ async def chat_with_agent(req: AgentChatRequest):
         fallback_cascade=req.fallback_cascade
     )
     return AgentResponse(**res_dict)
+
+@router.post("/chat/stream")
+@router.post("/stream")
+async def stream_chat_with_agent(req: AgentChatRequest):
+    """
+    Streaming Conversational AI Shopping Agent endpoint.
+    Emits Server-Sent Events (SSE) as tokens and tool execution milestones are processed.
+    """
+    if not req.message.strip():
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    async def event_stream():
+        try:
+            async for chunk in agent_engine.stream_user_turn(
+                user_input=req.message,
+                session_id=req.session_id,
+                llm_api_key=req.llm_api_key,
+                llm_provider=req.llm_provider or "groq",
+                model_name=req.model_name,
+                ollama_base_url=req.ollama_base_url,
+                user_id=req.user_id,
+                voice_mode=bool(req.voice_mode),
+                gemini_api_key=req.gemini_api_key,
+                openrouter_api_key=req.openrouter_api_key,
+                groq_api_key=req.groq_api_key,
+                fallback_cascade=req.fallback_cascade
+            ):
+                event_name = chunk.get("event", "message")
+                data_str = json.dumps(chunk.get("data", {}))
+                yield f"event: {event_name}\ndata: {data_str}\n\n"
+        except Exception as e:
+            err_data = json.dumps({"error": str(e)})
+            yield f"event: error\ndata: {err_data}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 @router.get("/sessions/{session_id}")
 async def get_agent_session(session_id: str):

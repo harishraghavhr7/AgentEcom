@@ -18,6 +18,7 @@ from langchain_core.messages import (
     ToolMessage,
     SystemMessage
 )
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, START, END
 
 from agentecom.agent.state import AgentState, ReadabilityMetric
@@ -267,11 +268,15 @@ async def safe_refusal_node(state: AgentState) -> Dict[str, Any]:
     }
 
 
-async def memory_enricher_node(state: AgentState) -> Dict[str, Any]:
+async def memory_enricher_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
     """
     Enriches AgentState with long-term customer persona (sizing, brand affinities, allergies, preferences).
+    Uses server-side config['configurable']['user_id'] when available.
     """
-    user_id = state.get("user_id") or "default_shopper"
+    auth_user_id = None
+    if config:
+        auth_user_id = config.get("configurable", {}).get("user_id") if isinstance(config, dict) or hasattr(config, "get") else None
+    user_id = auth_user_id or state.get("user_id") or "default_shopper"
     profile = await tool_get_user_profile(user_id=user_id)
     persona = {
         "user_id": user_id,
@@ -283,11 +288,16 @@ async def memory_enricher_node(state: AgentState) -> Dict[str, Any]:
     return {"user_persona": persona}
 
 
-async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
+async def agent_reasoning_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
     """
     LLM reasoning node that analyzes user request and decides tool calls or final answer,
     with full short-term conversational working memory including all entity attributes.
     """
+    auth_user_id = None
+    if config:
+        auth_user_id = config.get("configurable", {}).get("user_id") if isinstance(config, dict) or hasattr(config, "get") else None
+    user_id = auth_user_id or state.get("user_id") or "default_shopper"
+
     provider = state.get("provider", "groq")
     model_name = state.get("model_name")
     groq_api_key = state.get("groq_api_key")
@@ -374,24 +384,30 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
 
     messages = [SystemMessage(content=dynamic_prompt)] + list(state["messages"])
 
-    # Multi-Model Fallback Middleware Execution (groq -> gemini -> openrouter)
-    fallback_middleware = modelFallbackMiddleware(
-        fallbackModels=fallback_cascade or ["gemini", "openrouter"],
-        primary_model=provider if provider not in ["fallback", "auto", "cascade"] else "groq",
-        groq_api_key=groq_api_key,
-        gemini_api_key=gemini_api_key,
-        openrouter_api_key=openrouter_api_key,
-        ollama_base_url=ollama_base_url,
-        model_name=model_name
-    )
-    cascade_result = await fallback_middleware.execute(
-        messages=messages,
-        tools=COMMERCE_TOOLS
-    )
-    response = cascade_result.get("response")
-    active_prov = cascade_result.get("provider_used") or "local"
-    is_fallback = cascade_result.get("fallback_active", False)
-    fb_reason = cascade_result.get("fallback_reason")
+    if provider == "local":
+        response = None
+        active_prov = "local"
+        is_fallback = True
+        fb_reason = "Offline local deterministic planner"
+    else:
+        # Multi-Model Fallback Middleware Execution (groq -> gemini -> openrouter)
+        fallback_middleware = modelFallbackMiddleware(
+            fallbackModels=fallback_cascade or ["gemini", "openrouter"],
+            primary_model=provider if provider not in ["fallback", "auto", "cascade"] else "groq",
+            groq_api_key=groq_api_key,
+            gemini_api_key=gemini_api_key,
+            openrouter_api_key=openrouter_api_key,
+            ollama_base_url=ollama_base_url,
+            model_name=model_name
+        )
+        cascade_result = await fallback_middleware.execute(
+            messages=messages,
+            tools=COMMERCE_TOOLS
+        )
+        response = cascade_result.get("response")
+        active_prov = cascade_result.get("provider_used") or "local"
+        is_fallback = cascade_result.get("fallback_active", False)
+        fb_reason = cascade_result.get("fallback_reason")
 
     if response is not None:
         # Check native tool calls
@@ -517,7 +533,6 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
 
     # 0e. Customer Persona Update Intent
     elif bool(re.search(r'\b(my\s+size\s+is|i\s+wear\s+size|allergic\s+to|i\s+prefer\s+brand)\b', low)):
-        user_id = state.get("user_id") or "default_shopper"
         sizing = {}
         size_match = re.search(r'\b(?:i\s+wear|my\s+size\s+is|size)\s+(?:size\s+)?(XS|S|M|L|XL|XXL|[\d\.]+)\b', last_msg, re.IGNORECASE)
         if size_match:
@@ -831,11 +846,20 @@ async def agent_reasoning_node(state: AgentState) -> Dict[str, Any]:
     return {"messages": [ai_msg], "fallback_active": True, "fallback_reason": "Offline zero-key local planner active"}
 
 
-async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
+async def tool_execution_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
     """
     Executes tool calls generated by the agent and captures structured commerce results
     while updating short-term conversational working memory.
+    Enforces server-side authenticated user context from config['configurable']['user_id']
+    to prevent client state tampering and IDOR vulnerabilities.
     """
+    # Trusted server-side authenticated user context (never trust mutable state.user_id alone)
+    auth_user_id = None
+    if config:
+        auth_user_id = config.get("configurable", {}).get("user_id") if isinstance(config, dict) or hasattr(config, "get") else None
+    if not auth_user_id:
+        auth_user_id = state.get("user_id") or "default_shopper"
+
     last_msg = state["messages"][-1]
     tool_calls = getattr(last_msg, "tool_calls", []) or []
 
@@ -1107,7 +1131,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
                 items = [{"sku": recent_skus[0], "quantity": 1}]
             
             idem_key = f"idem_sess_{uuid.uuid4().hex[:8]}"
-            res = await tool_create_checkout_session(items=items, idempotency_key=idem_key, ttl_minutes=15)
+            res = await tool_create_checkout_session(items=items, idempotency_key=idem_key, ttl_minutes=15, user_id=auth_user_id)
             if "error" in res:
                 result_str = f"Checkout session creation failed: {res['error']}"
             else:
@@ -1136,7 +1160,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
                 
                 if items:
                     idem_sess_key = f"idem_sess_{uuid.uuid4().hex[:8]}"
-                    sess_res = await tool_create_checkout_session(items=items, idempotency_key=idem_sess_key, ttl_minutes=15)
+                    sess_res = await tool_create_checkout_session(items=items, idempotency_key=idem_sess_key, ttl_minutes=15, user_id=auth_user_id)
                     if "session_id" in sess_res:
                         checkout_session = sess_res
                         sess_id = sess_res["session_id"]
@@ -1150,7 +1174,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
                     continue
 
             confirm_key = f"idem_order_{uuid.uuid4().hex[:8]}"
-            res = await tool_confirm_checkout(session_id=sess_id, idempotency_key=confirm_key)
+            res = await tool_confirm_checkout(session_id=sess_id, idempotency_key=confirm_key, user_id=auth_user_id)
             if "error" in res:
                 # If checkout session was expired or not found, try creating a fresh session from cart
                 items = []
@@ -1161,9 +1185,9 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
                 
                 if items and "not found" in res["error"].lower():
                     idem_sess_key = f"idem_sess_{uuid.uuid4().hex[:8]}"
-                    sess_res = await tool_create_checkout_session(items=items, idempotency_key=idem_sess_key, ttl_minutes=15)
+                    sess_res = await tool_create_checkout_session(items=items, idempotency_key=idem_sess_key, ttl_minutes=15, user_id=auth_user_id)
                     if "session_id" in sess_res:
-                        res = await tool_confirm_checkout(session_id=sess_res["session_id"], idempotency_key=confirm_key)
+                        res = await tool_confirm_checkout(session_id=sess_res["session_id"], idempotency_key=confirm_key, user_id=auth_user_id)
 
                 if "error" in res:
                     result_str = f"Confirmation failed: {res['error']}"
@@ -1256,16 +1280,19 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
             except (ValueError, TypeError):
                 lim = 5
 
-            res = await tool_get_orders(order_number=ord_num, limit=lim)
+            res = await tool_get_orders(order_number=ord_num, limit=lim, user_id=auth_user_id)
             orders = res.get("orders", [])
 
-            # Also check short-term memory and session state for active/recent orders
+            # Also check short-term memory and session state for active/recent orders, verifying ownership
             if not orders and short_term_memory.get("active_order"):
-                orders = [short_term_memory["active_order"]]
+                act_ord = short_term_memory["active_order"]
+                if act_ord.get("user_id") in [auth_user_id, None]:
+                    orders = [act_ord]
             elif not orders and short_term_memory.get("recent_orders"):
-                orders = list(short_term_memory["recent_orders"])
+                orders = [o for o in short_term_memory["recent_orders"] if o.get("user_id") in [auth_user_id, None]]
             elif state.get("order") and not any(o.get("order_number") == state["order"].get("order_number") for o in orders):
-                orders.insert(0, state["order"])
+                if state["order"].get("user_id") in [auth_user_id, None]:
+                    orders.insert(0, state["order"])
 
             if orders:
                 short_term_memory["active_order"] = orders[0]
@@ -1300,7 +1327,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
 
         elif tool_name == "cancel_order":
             ord_num = args.get("order_number")
-            res = await tool_cancel_order(order_number=ord_num)
+            res = await tool_cancel_order(order_number=ord_num, user_id=auth_user_id)
             if "error" in res:
                 result_str = f"⚠️ Could not cancel order: {res['error']}"
             else:
@@ -1318,7 +1345,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
             ord_num = args.get("order_number")
             old_sku = args.get("old_sku")
             new_sku = args.get("new_sku")
-            res = await tool_swap_order_item(order_number=ord_num, old_sku=old_sku, new_sku=new_sku)
+            res = await tool_swap_order_item(order_number=ord_num, old_sku=old_sku, new_sku=new_sku, user_id=auth_user_id)
             if "error" in res:
                 result_str = f"⚠️ Swap item failed: {res['error']}"
             else:
@@ -1335,7 +1362,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
             sku = args.get("sku")
             reason = args.get("reason", "Customer return")
             days_count = args.get("days_since_order", 5)
-            res = await tool_create_return_request(order_number=ord_num, sku=sku, reason=reason, days_since_order=days_count)
+            res = await tool_create_return_request(order_number=ord_num, sku=sku, reason=reason, days_since_order=days_count, user_id=auth_user_id)
             
             if res.get("is_out_of_policy"):
                 result_str = (
@@ -1358,7 +1385,7 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
 
         elif tool_name == "track_shipment":
             ord_num = args.get("order_number")
-            res = await tool_track_shipment(order_number=ord_num)
+            res = await tool_track_shipment(order_number=ord_num, user_id=auth_user_id)
             
             checkpoints_lines = []
             for cp in res.get("checkpoints", []):
@@ -1376,9 +1403,8 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
             )
 
         elif tool_name == "update_user_persona":
-            u_id = args.get("user_id", "default_shopper")
             res = await tool_update_user_profile(
-                user_id=u_id,
+                user_id=auth_user_id,
                 updates={
                     "sizing": args.get("sizing", {}),
                     "brand_affinities": args.get("brand_affinities", []),
@@ -1434,11 +1460,15 @@ async def tool_execution_node(state: AgentState) -> Dict[str, Any]:
         }
 
 
-async def memory_updater_node(state: AgentState) -> Dict[str, Any]:
+async def memory_updater_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
     """
     Passively extracts newly stated customer preferences from conversation and persists to UserProfile.
+    Uses trusted server-side user_id from config['configurable']['user_id'].
     """
-    user_id = state.get("user_id") or "default_shopper"
+    auth_user_id = None
+    if config:
+        auth_user_id = config.get("configurable", {}).get("user_id") if isinstance(config, dict) or hasattr(config, "get") else None
+    user_id = auth_user_id or state.get("user_id") or "default_shopper"
     last_msg = ""
     for m in reversed(state.get("messages", [])):
         if isinstance(m, HumanMessage):

@@ -60,8 +60,20 @@ class AgentCache:
     def __init__(self):
         self._store: Dict[str, CacheEntry] = {}
         self._tag_to_keys: Dict[str, Set[str]] = {}
-        self._lock = asyncio.Lock()
+        self._actual_lock: Optional[asyncio.Lock] = None
+        self._current_lock_loop = None
         self.metrics = CacheMetrics()
+
+    @property
+    def _lock(self) -> asyncio.Lock:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.Lock()
+        if self._current_lock_loop != loop or self._actual_lock is None:
+            self._current_lock_loop = loop
+            self._actual_lock = asyncio.Lock()
+        return self._actual_lock
 
     def _generate_search_key(self, query: str, filters: Dict[str, Any]) -> str:
         payload = f"{query.strip().lower()}:{json.dumps(filters, sort_keys=True)}"

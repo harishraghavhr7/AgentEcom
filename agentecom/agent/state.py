@@ -52,6 +52,7 @@ class AgentResponse(BaseModel):
     requires_human_approval: bool = False
     voice_mode: bool = False
     readability: ReadabilityMetric = Field(default_factory=ReadabilityMetric)
+    mcp_server_info: Optional[Dict[str, Any]] = None
 
 class AgentState(TypedDict):
     messages: Annotated[Sequence[BaseMessage], add_messages]

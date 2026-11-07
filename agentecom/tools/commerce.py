@@ -25,6 +25,7 @@ from agentecom.core.cache import cache
 from agentecom.search.hybrid import hybrid_engine
 from agentecom.core.checkout import checkout_manager, CheckoutError
 from agentecom.db.seed import SAMPLE_PRODUCTS
+from agentecom.integrations.shopify.client import shopify_client
 
 # Optional LangSmith decorator for deep telemetry
 try:
@@ -251,7 +252,8 @@ async def tool_check_inventory(skus: List[str]) -> Dict[str, Any]:
 async def tool_create_checkout_session(
     items: List[Dict[str, Any]],
     idempotency_key: str,
-    ttl_minutes: int = 15
+    ttl_minutes: int = 15,
+    user_id: Optional[str] = "default_shopper"
 ) -> Dict[str, Any]:
     """
     Create a short-lived isolated checkout session with idempotency key.
@@ -262,14 +264,40 @@ async def tool_create_checkout_session(
                 db=db,
                 items=items,
                 idempotency_key=idempotency_key,
-                ttl_minutes=ttl_minutes
+                ttl_minutes=ttl_minutes,
+                user_id=user_id
             )
+            cart_items = json.loads(session.cart_json)
+            shopify_items = []
+            for it in cart_items:
+                p_id = it.get("product_id")
+                if p_id:
+                    p_res = await db.execute(select(Product).where(Product.id == p_id))
+                    p_obj = p_res.scalar_one_or_none()
+                    if p_obj and p_obj.attributes_json:
+                        try:
+                            attrs = json.loads(p_obj.attributes_json)
+                            if "shopify_variant_id" in attrs:
+                                shopify_items.append({
+                                    "variant_id": attrs["shopify_variant_id"],
+                                    "quantity": it.get("quantity", 1)
+                                })
+                        except Exception:
+                            pass
+
+            checkout_url = (
+                shopify_client.generate_cart_permalink(shopify_items)
+                if shopify_items
+                else f"https://{shopify_client.store_domain}/cart"
+            )
+
             return {
                 "session_id": session.id,
                 "idempotency_key": session.idempotency_key,
                 "status": session.status.value,
                 "total_amount": session.total_amount,
-                "items": json.loads(session.cart_json),
+                "items": cart_items,
+                "checkout_url": checkout_url,
                 "expires_at": session.expires_at.isoformat(),
                 "is_new_session": is_new
             }
@@ -281,10 +309,12 @@ async def tool_create_checkout_session(
 async def tool_confirm_checkout(
     session_id: str,
     idempotency_key: str,
-    customer_email: Optional[str] = "agent-user@example.com"
+    customer_email: Optional[str] = "agent-user@example.com",
+    user_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Confirm an isolated checkout session into a permanent Order idempotently.
+    Enforces server-side user_id authorization.
     """
     async with AsyncSessionLocal() as db:
         try:
@@ -292,10 +322,12 @@ async def tool_confirm_checkout(
                 db=db,
                 session_id=session_id,
                 idempotency_key=idempotency_key,
-                customer_email=customer_email
+                customer_email=customer_email,
+                user_id=user_id
             )
             return {
                 "order_number": order.order_number,
+                "user_id": order.user_id,
                 "idempotency_key": order.idempotency_key,
                 "checkout_session_id": order.checkout_session_id,
                 "status": order.status.value,
@@ -313,10 +345,12 @@ async def tool_confirm_checkout(
 async def tool_get_orders(
     order_number: Optional[str] = None,
     customer_email: Optional[str] = None,
-    limit: int = 10
+    limit: int = 10,
+    user_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Retrieve order details and purchase history by order number or list recent orders.
+    Enforces server-side user ownership: customers can only view their own orders.
     """
     # Sanitize order_number in case LLM passes generic query strings or placeholders
     if order_number:
@@ -333,6 +367,9 @@ async def tool_get_orders(
 
     async with AsyncSessionLocal() as db:
         stmt = select(Order)
+        # Enforce server-side user_id filtering to prevent IDOR attacks
+        if user_id:
+            stmt = stmt.where(Order.user_id == user_id)
         if order_number:
             stmt = stmt.where(Order.order_number == order_number)
         elif customer_email:
@@ -363,9 +400,10 @@ async def tool_get_orders(
 
 
 @traceable(name="tool_cancel_order", run_type="tool")
-async def tool_cancel_order(order_number: str) -> Dict[str, Any]:
+async def tool_cancel_order(order_number: str, user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Cancel an existing order and restore reserved stock if not yet shipped.
+    Enforces server-side authorization: user can only cancel their own orders.
     """
     ord_clean = str(order_number).strip().upper()
     ord_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', ord_clean, re.IGNORECASE)
@@ -374,11 +412,13 @@ async def tool_cancel_order(order_number: str) -> Dict[str, Any]:
 
     async with AsyncSessionLocal() as db:
         stmt = select(Order).where(Order.order_number == ord_clean)
+        if user_id:
+            stmt = stmt.where(Order.user_id == user_id)
         res = await db.execute(stmt)
         order = res.scalar_one_or_none()
 
         if not order:
-            return {"error": f"Order `{ord_clean}` not found.", "status_code": 404}
+            return {"error": f"Order `{ord_clean}` not found or not authorized.", "status_code": 404}
 
         if order.status in [OrderStatus.CANCELLED, "CANCELLED"]:
             return {"error": f"Order `{ord_clean}` is already cancelled.", "status_code": 400}
@@ -420,9 +460,10 @@ async def tool_cancel_order(order_number: str) -> Dict[str, Any]:
 
 
 @traceable(name="tool_swap_order_item", run_type="tool")
-async def tool_swap_order_item(order_number: str, old_sku: str, new_sku: str) -> Dict[str, Any]:
+async def tool_swap_order_item(order_number: str, old_sku: str, new_sku: str, user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Swap an item (size, color, or variant) in an unfulfilled order before shipment.
+    Enforces server-side user ownership.
     """
     ord_clean = str(order_number).strip().upper()
     ord_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', ord_clean, re.IGNORECASE)
@@ -431,11 +472,13 @@ async def tool_swap_order_item(order_number: str, old_sku: str, new_sku: str) ->
 
     async with AsyncSessionLocal() as db:
         stmt = select(Order).where(Order.order_number == ord_clean)
+        if user_id:
+            stmt = stmt.where(Order.user_id == user_id)
         res = await db.execute(stmt)
         order = res.scalar_one_or_none()
 
         if not order:
-            return {"error": f"Order `{ord_clean}` not found.", "status_code": 404}
+            return {"error": f"Order `{ord_clean}` not found or not authorized.", "status_code": 404}
 
         if order.status in [OrderStatus.SHIPPED, OrderStatus.CANCELLED]:
             return {"error": f"Order `{ord_clean}` cannot be modified because its status is `{order.status}`.", "status_code": 400}
@@ -479,10 +522,12 @@ async def tool_create_return_request(
     order_number: str,
     sku: str,
     reason: str,
-    days_since_order: int = 5
+    days_since_order: int = 5,
+    user_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Process Return Merchandise Authorization (RMA) with automated 30-day policy check and label generation.
+    Enforces server-side user ownership.
     """
     ord_clean = str(order_number).strip().upper()
     ord_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', ord_clean, re.IGNORECASE)
@@ -493,6 +538,13 @@ async def tool_create_return_request(
     is_out_of_policy = days_since_order > 30
 
     async with AsyncSessionLocal() as db:
+        # Enforce server-side user verification
+        if user_id:
+            ord_stmt = select(Order).where(Order.order_number == ord_clean, Order.user_id == user_id)
+            ord_res = await db.execute(ord_stmt)
+            if not ord_res.scalar_one_or_none():
+                return {"error": f"Order `{ord_clean}` not found or you are not authorized to return items from it.", "status_code": 403}
+
         status = ReturnStatus.PENDING_REVIEW if is_out_of_policy else ReturnStatus.APPROVED
         label_url = None if is_out_of_policy else f"https://returns.agentecom.com/labels/{rma_number}.pdf"
 
@@ -527,9 +579,10 @@ async def tool_create_return_request(
 
 
 @traceable(name="tool_track_shipment", run_type="tool")
-async def tool_track_shipment(order_number: str) -> Dict[str, Any]:
+async def tool_track_shipment(order_number: str, user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Retrieve live courier tracking checkpoints and estimated delivery for an order.
+    Enforces server-side user authorization.
     """
     ord_clean = str(order_number).strip().upper()
     ord_match = re.search(r'\b(ORD-[A-Z0-9\-]+)\b', ord_clean, re.IGNORECASE)
@@ -537,6 +590,12 @@ async def tool_track_shipment(order_number: str) -> Dict[str, Any]:
         ord_clean = ord_match.group(1).upper()
 
     async with AsyncSessionLocal() as db:
+        if user_id:
+            ord_stmt = select(Order).where(Order.order_number == ord_clean, Order.user_id == user_id)
+            ord_res = await db.execute(ord_stmt)
+            if not ord_res.scalar_one_or_none():
+                return {"error": f"Shipment tracking for order `{ord_clean}` not found or not authorized.", "status_code": 403}
+
         stmt = select(ShipmentTracking).where(ShipmentTracking.order_number == ord_clean)
         res = await db.execute(stmt)
         tracking = res.scalar_one_or_none()
@@ -557,7 +616,8 @@ async def tool_track_shipment(order_number: str) -> Dict[str, Any]:
                 status=ShipmentStatus.OUT_FOR_DELIVERY,
                 estimated_delivery=est,
                 current_location="Local Delivery Route",
-                history_json=json.dumps(history)
+                history_json=json.dumps(history),
+                user_id=user_id
             )
             db.add(tracking)
             await db.commit()

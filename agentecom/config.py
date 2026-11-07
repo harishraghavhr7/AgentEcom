@@ -6,6 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Ensure .env is explicitly loaded into os.environ
 load_dotenv(override=True)
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 def _sanitize_env_val(val: Optional[str]) -> Optional[str]:
     if not val:
@@ -62,6 +64,14 @@ class Settings(BaseSettings):
     LANGSMITH_API_KEY: Optional[str] = os.getenv("LANGSMITH_API_KEY")
     LANGSMITH_PROJECT: str = os.getenv("LANGSMITH_PROJECT", "AgentEcom")
     LANGSMITH_ENDPOINT: str = os.getenv("LANGSMITH_ENDPOINT", "https://api.smith.langchain.com")
+
+    # Shopify App Integration Configuration
+    SHOPIFY_API_KEY: Optional[str] = _sanitize_env_val(os.getenv("SHOPIFY_API_KEY"))
+    SHOPIFY_API_SECRET: Optional[str] = _sanitize_env_val(os.getenv("SHOPIFY_API_SECRET"))
+    SHOPIFY_STORE_DOMAIN: Optional[str] = _sanitize_env_val(os.getenv("SHOPIFY_STORE_DOMAIN"))
+    SHOPIFY_ACCESS_TOKEN: Optional[str] = _sanitize_env_val(os.getenv("SHOPIFY_ACCESS_TOKEN"))
+    SHOPIFY_API_VERSION: str = os.getenv("SHOPIFY_API_VERSION", "2024-10")
+    SHOPIFY_APP_URL: Optional[str] = os.getenv("SHOPIFY_APP_URL", "http://localhost:8000")
 
     @field_validator("GROQ_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY", "LANGSMITH_API_KEY", mode="before")
     @classmethod

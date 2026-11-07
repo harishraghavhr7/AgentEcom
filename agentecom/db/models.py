@@ -70,6 +70,7 @@ class CheckoutSession(Base):
     __tablename__ = "checkout_sessions"
 
     id = Column(String(64), primary_key=True, index=True)  # session_...
+    user_id = Column(String(128), index=True, nullable=True, default="default_shopper")
     idempotency_key = Column(String(128), unique=True, index=True, nullable=False)
     cart_json = Column(Text, nullable=False)  # Items array JSON
     total_amount = Column(Float, nullable=False)
@@ -86,6 +87,7 @@ class Order(Base):
     __tablename__ = "orders"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(128), index=True, nullable=True, default="default_shopper")
     order_number = Column(String(64), unique=True, index=True, nullable=False)
     idempotency_key = Column(String(128), unique=True, index=True, nullable=False)
     checkout_session_id = Column(String(64), nullable=False)
@@ -151,6 +153,7 @@ class ShipmentTracking(Base):
     __tablename__ = "shipment_trackings"
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(128), index=True, nullable=True, default="default_shopper")
     order_number = Column(String(64), unique=True, index=True, nullable=False)
     carrier = Column(String(64), default="FedEx Express")
     tracking_number = Column(String(128), unique=True, index=True, nullable=False)
